@@ -2,6 +2,8 @@
 
 using namespace std;
 
+map< uint32_t, bool > last_signature;
+
 bool debug_nodes = true;
 node :: node()
 {
@@ -136,13 +138,23 @@ void node :: get_bias(datatype & bias_value)
 
 void node :: get_forward_connections(map< uint32_t , pair< node * , datatype > > & forward_nodes_container)
 {
-  assert(!forward_nodes.empty());
+  if(forward_nodes.empty())
+  {
+    forward_nodes_container.clear();
+    return;
+  }
+
   forward_nodes_container = forward_nodes;
 }
 void node :: get_backward_connections(map< uint32_t , pair< node * , datatype > > & backward_nodes_container)
 {
 
   assert(!backward_nodes.empty());
+  if(backward_nodes.empty())
+  {
+    backward_nodes_container.clear();
+    return;
+  }
   backward_nodes_container = backward_nodes;
 }
 
@@ -178,6 +190,8 @@ datatype node :: return_current_output(void)
   }
   else if (node_type == _relu_)
   {
+    last_signature[node_id] = ((argument > 0) ? true : false) ;
+
     return (argument > 0) ? argument : 0 ;
   }
   else if(node_type == _none_)

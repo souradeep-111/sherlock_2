@@ -2,7 +2,7 @@
 
 using namespace std;
 
-bool debug_sherlock = false;
+bool debug_sherlock = true;
 
 sherlock :: sherlock()
 {
@@ -38,6 +38,18 @@ void sherlock :: optimize_node(uint32_t node_index, bool direction,
 
   if( network_constraints.optimize(node_index, direction, neuron_values, optima_achieved) )
   {
+    // if(debug_sherlock)
+    // {
+    //   cout << "Point of " << (direction?"maxima":"minima") << " found at " << endl;
+    //   vector< uint32_t> input_nodes, output_nodes;
+    //   neural_network.return_id_of_input_output_nodes(input_nodes, output_nodes);
+    //   map< uint32_t, double > optima_point;
+    //   for(auto index:input_nodes)
+    //   {
+    //     optima_point[index] = neuron_values[index];
+    //   }
+    //   print_point(optima_point);
+    // }
     return;
   }
   else
@@ -50,20 +62,56 @@ void sherlock :: optimize_node(uint32_t node_index, bool direction,
 
 }
 
+void sherlock :: optimize_constrained(uint32_t node_index, bool direction,
+                               region_constraints & input_region,
+                               vector< linear_inequality > & inequalities,
+                               double & optima_achieved)
+{
+  map< uint32_t, double > neuron_values;
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(
+                      neural_network, input_region);
+  network_constraints.generate_graph_constraints(
+                      input_region, neural_network, node_index);
+
+  for(auto & each_inequality : inequalities)
+  {
+    network_constraints.add_linear_constraint(each_inequality);
+  }
+
+  if( network_constraints.optimize(node_index, direction, neuron_values, optima_achieved) )
+  {
+    return;
+  }
+  else
+  {
+    cout << "Optimization failed , terminating itself ! " << endl;
+    assert(false);
+  }
+
+  return;
+}
+
 void sherlock :: compute_output_range(uint32_t node_index,
                                       region_constraints & input_region,
                                       pair < double, double >& output_range )
 {
-  if(debug_sherlock)
-  {
-    cout << "Entering compute_output_range " << endl;
-  }
+
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+
+  if(!sherlock_parameters.skip_invariant_addition)
+  network_constraints.add_invariants(neural_network, input_region);
 
   // Maximizing
   gradient_driven_optimization(node_index, input_region, true, output_range.second);
+  nodes_explored = network_constraints.nodes_explored_last_optimization;
+
 
   // Minimizing :
   gradient_driven_optimization(node_index, input_region, false, output_range.first);
+  nodes_explored += network_constraints.nodes_explored_last_optimization;
 
 }
 
@@ -77,9 +125,10 @@ void sherlock :: gradient_driven_optimization(uint32_t node_index,
   map<uint32_t, double > neuron_values, search_point;
 
   // assert(indices_of_output_nodes.size() == 1);
-  network_constraints.delete_and_reinitialize();
-  network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
-  network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+  // network_constraints.delete_and_reinitialize();
+  // network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  // network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+  // network_constraints.add_invariants(neural_network, input_region);
 
   bool res = true;
 
@@ -128,9 +177,9 @@ void sherlock :: gradient_driven_optimization(uint32_t node_index,
 
       neural_network.evaluate_graph(search_point, neuron_values);
       double actual_val = neuron_values[node_index];
-      if(abs(actual_val - current_optima) > sherlock_parameters.MILP_tolerance)
+      if(fabs(actual_val - current_optima) > sherlock_parameters.MILP_tolerance)
       {
-        optimize_node(7, direction, input_region, optima);
+        optimize_node(node_index, direction, input_region, optima);
         return;
       }
     }
@@ -150,7 +199,7 @@ void sherlock :: gradient_driven_optimization(uint32_t node_index,
     if(sherlock_parameters.verbosity)
     {
       cout << "Nodes explored = " << network_constraints.nodes_explored_last_optimization << endl;
-      cout << "Counter example found at : ";
+      cout << "This phase ends at : ";
       print_point(search_point);
       cout << endl;
     }
@@ -199,8 +248,13 @@ void sherlock :: perform_gradient_search(uint32_t node_index, bool direction,
   while(improvement > sherlock_parameters.grad_termination_limit)
   {
 
+    cout << "Attempting Gradient computation " << endl;
     /* Do gradient compuutation */
     network_gradient = neural_network.return_gradient_wrt_inputs(node_index, current_point);
+
+    cout << "Gradient computation ends " << endl;
+
+
     if(bad_gradients(network_gradient))
     {
       neural_network.evaluate_graph(current_point, network_output_value_1);
@@ -267,8 +321,10 @@ void sherlock :: perform_gradient_search(uint32_t node_index, bool direction,
   }
 
 
-  if(!improvement < 0.0)
+
+  if(improvement > 0.0)
   {
+    starting_point = current_point;
     val = value_curr;
   }
 
@@ -319,11 +375,9 @@ void sherlock :: perform_gradient_search_with_random_restarts(uint32_t node_inde
     restart_count ++;
   }
 
+  starting_point = current_point;
 
-  if(debug_sherlock)
-  {
-    cout << "Randomized gradient descent ends at value : " << val << endl;
-  }
+
   return;
 
 }
@@ -461,10 +515,7 @@ void sherlock :: compute_output_range_by_sampling(region_constraints & input_reg
                                                   pair < double , double > & output_range,
                                                   uint32_t sample_count)
 {
-  if(debug_sherlock)
-  {
-    cout << "Entering compute_output_range by random sampling " << endl;
-  }
+
   // assert(sample_count > 10);
   map < uint32_t, double > input_point;
   map < uint32_t, double > output_val;
@@ -517,11 +568,30 @@ bool sherlock :: return_best_effort_random_counter_example(bool direction,
   return false;
 }
 
+void sherlock :: add_constraint(linear_inequality & lin_ineq)
+{
+  network_constraints.add_linear_constraint(lin_ineq);
+}
+
+bool sherlock :: prove_bounds(uint32_t node_index, double bound, bool direction,
+                              region_constraints& input_region, set< uint32_t >& binarized_neurons)
+{
+  selective_binarization nn_constraints;
+  return nn_constraints.perform_binarization(node_index, bound, direction,  input_region,
+                                             neural_network, binarized_neurons);
+}
+
+
+
 
 void create_computation_graph_from_file(string filename,
                                         computation_graph & CG,
-                                        bool has_output_relu)
+                                        bool has_output_relu,
+                                        vector<uint32_t>& input_node_indices,
+                                        vector<uint32_t>& output_node_indices)
 {
+  input_node_indices.clear();
+  output_node_indices.clear();
   CG.clear();
   ifstream file;
   file.open(filename.c_str(), ios::in);
@@ -544,7 +614,8 @@ void create_computation_graph_from_file(string filename,
     i++;
   }
 
-  node_index = 0;
+
+  node_index = 1;
 
   // Creating the input nodes, and adding them to the computation graph
   indices_of_previous_layer_nodes.clear();
@@ -555,7 +626,7 @@ void create_computation_graph_from_file(string filename,
     CG.add_new_node(node_index, node_x);
     CG.mark_node_as_input(node_index);
     indices_of_previous_layer_nodes.push_back(node_index);
-
+    input_node_indices.push_back(node_index);
     node_index ++;
     i++;
   }
@@ -569,7 +640,7 @@ void create_computation_graph_from_file(string filename,
       CG.add_new_node(node_index, node_x);
       indices_of_current_layer_nodes.push_back(node_index);
 
-      no_of_neurons_in_previous_layer = (i == 0) ? (no_of_inputs):(network_configuration[i-1]) ;
+      no_of_neurons_in_previous_layer = ((i == 0) ? (no_of_inputs):(network_configuration[i-1])) ;
       assert(no_of_neurons_in_previous_layer == indices_of_previous_layer_nodes.size());
       // Reading the weights
       for(k = 0; k < no_of_neurons_in_previous_layer; k++)
@@ -584,25 +655,26 @@ void create_computation_graph_from_file(string filename,
     }
     indices_of_previous_layer_nodes = indices_of_current_layer_nodes;
   }
-
-  i = 0;
-  while(i < no_of_outputs )
-  {
-    node node_x(node_index, "relu");
-    CG.add_new_node(node_index, node_x);
-    CG.mark_node_as_output(node_index);
-    indices_of_previous_layer_nodes.push_back(node_index);
-    node_index ++;
-    i++;
-  }
+  //
+  // i = 0;
+  // while(i < no_of_outputs )
+  // {
+  //   node node_x(node_index, "relu");
+  //   CG.add_new_node(node_index, node_x);
+  //   CG.mark_node_as_output(node_index);
+  //   indices_of_previous_layer_nodes.push_back(node_index);
+  //   node_index ++;
+  //   i++;
+  // }
 
   // Reading the output mapping
   for( j = 0 ; j < no_of_outputs ; j++ )
   {
-    string type = (has_output_relu) ? ("relu") : ("none");
+    string node_type = (has_output_relu) ? ("relu") : ("none");
 
-    node node_x(node_index, type);
+    node node_x(node_index, node_type);
     CG.add_new_node(node_index, node_x);
+    CG.mark_node_as_output(node_index);
 
     no_of_neurons_in_previous_layer = network_configuration[no_of_hidden_layers - 1] ;
     // Reading the weights
@@ -614,12 +686,11 @@ void create_computation_graph_from_file(string filename,
     // Reading the bias
     file >> buffer;
     CG.set_bias_of_node(node_index, buffer);
+    output_node_indices.push_back(node_index);
     node_index ++;
   }
 
 }
-
-
 
 
 void test_network_1(computation_graph & CG)

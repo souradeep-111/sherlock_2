@@ -33,6 +33,7 @@ public:
   bool empty();
   uint32_t size();
   void print();
+  bool same_direction(linear_inequality & rhs);
   friend class region_constraints;
 };
 
@@ -42,6 +43,8 @@ class region_constraints
 private:
   uint32_t dimension;
   vector< linear_inequality > polytope;
+  map< uint32_t, pair< double, double > > limits_in_axes_directions;
+
 public:
   region_constraints();
   region_constraints(int dim);
@@ -76,6 +79,7 @@ public:
   void overapproximate_polyhedron_as_rectangle( map< uint32_t, pair< double, double > >& interval);
   void print();
   vector<int> get_input_indices();
+  bool has(map<uint32_t, double >& direction_vector, double & bias_term);
 
 };
 

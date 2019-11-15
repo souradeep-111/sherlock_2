@@ -135,7 +135,9 @@ void computation_graph :: evaluate_graph(map < uint32_t, double > input_node_and
 
 }
 
-void evaluate_node(computation_graph & c_graph, uint32_t node_id , map< uint32_t , double > & table,
+
+void evaluate_node(computation_graph & c_graph, uint32_t node_id ,
+                   map< uint32_t , double > & table,
                    int & available_threads, double & ret_val , int thread_id)
 {
 
@@ -381,7 +383,8 @@ void evaluate_node(computation_graph & c_graph, uint32_t node_id , map< uint32_t
 
 }
 
-map< uint32_t, datatype > computation_graph :: return_gradient_wrt_inputs(uint32_t node_id,  map < uint32_t, double > & input_node_and_value )
+map< uint32_t, datatype > computation_graph :: return_gradient_wrt_inputs(
+                uint32_t node_id,  map < uint32_t, double > & input_node_and_value )
 {
   if(debug_deriv)
   {
@@ -745,8 +748,96 @@ void computation_graph :: return_id_of_all_nodes(vector< uint32_t >& node_indice
 }
 
 
-void computation_graph :: return_id_of_input_output_nodes(vector< uint32_t > & in_nodes , vector< uint32_t > & op_nodes )
+void computation_graph :: return_id_of_input_output_nodes(vector< uint32_t > & in_nodes ,
+                                                          vector< uint32_t > & op_nodes )
 {
   in_nodes = input_nodes;
   op_nodes = output_nodes;
+}
+void computation_graph :: return_id_of_nodes_at_depth_one_from_set(
+                                                  vector<uint32_t> current_vector ,
+                                                  set <uint32_t> & set_at_depth_one)
+{
+
+
+  set_at_depth_one.clear();
+  node current_node;
+  uint32_t current_node_index;
+  bool relu_detected;
+  map< uint32_t, pair< node * , double > > forward_nodes_container;
+
+  // Make a queue out of the current set
+  queue < uint32_t > unexplored_nodes;
+  for(auto each_node : current_vector)
+    unexplored_nodes.push(each_node);
+
+
+  relu_detected = false;
+  while(!unexplored_nodes.empty())
+  {
+    current_node_index = unexplored_nodes.front();
+    unexplored_nodes.pop();
+
+    current_node = all_nodes[current_node_index];
+
+    current_node.get_forward_connections(forward_nodes_container);
+    for(auto each_forward_connection : forward_nodes_container)
+    {
+      if(each_forward_connection.second.first->get_node_type() == _relu_)
+      {
+        set_at_depth_one.insert(each_forward_connection.first);
+        relu_detected = true;
+      }
+      else
+      {
+        if(!relu_detected)
+          unexplored_nodes.push(each_forward_connection.first);
+      }
+    }
+  }
+
+  return;
+}
+
+void computation_graph :: return_id_of_nodes_at_depth_one_from_set(
+                                                  set < uint32_t > current_set ,
+                                                  set < uint32_t > & set_at_depth_one)
+{
+
+  set_at_depth_one.clear();
+  node current_node;
+  uint32_t current_node_index;
+  bool relu_detected;
+  map< uint32_t, pair< node * , double > > forward_nodes_container;
+
+  // Make a queue out of the current set
+  queue < uint32_t > unexplored_nodes;
+  for(auto each_node : current_set)
+    unexplored_nodes.push(each_node);
+
+  relu_detected = false;
+  while(!unexplored_nodes.empty())
+  {
+    current_node_index = unexplored_nodes.front();
+    unexplored_nodes.pop();
+
+    current_node = all_nodes[current_node_index];
+
+    current_node.get_forward_connections(forward_nodes_container);
+    for(auto each_forward_connection : forward_nodes_container)
+    {
+      if(each_forward_connection.second.first->get_node_type() == _relu_)
+      {
+        set_at_depth_one.insert(each_forward_connection.first);
+        relu_detected = true;
+      }
+      else
+      {
+        if(!relu_detected)
+          unexplored_nodes.push(each_forward_connection.first);
+      }
+    }
+  }
+
+  return;
 }

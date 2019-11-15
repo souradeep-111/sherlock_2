@@ -2,6 +2,8 @@
 
 using namespace std;
 
+bool debug_reg = true;
+
 linear_inequality :: linear_inequality()
 {
   dimension = 0;
@@ -33,7 +35,8 @@ void linear_inequality :: update(map< int,  double > & lin_ineq)
   inequality = lin_ineq;
 }
 
-void linear_inequality :: add_this_constraint_to_MILP_model(map< uint32_t, GRBVar >& grb_variables,
+void linear_inequality :: add_this_constraint_to_MILP_model(
+                                map< uint32_t, GRBVar >& grb_variables,
                                 GRBModel * grb_model)
 {
   assert(grb_model);
@@ -46,8 +49,10 @@ void linear_inequality :: add_this_constraint_to_MILP_model(map< uint32_t, GRBVa
 
   for(auto & some_var : grb_variables)
   {
-    if(some_var.first < 0)
+    if((some_var.first < 0) || (inequality.find(some_var.first) == inequality.end()))
+    {
       continue;
+    }
     data = inequality[some_var.first];
     expression.addTerms(& data, & grb_variables[some_var.first], 1);
   }
@@ -91,11 +96,33 @@ void linear_inequality :: print()
   cout << " ] ";
 }
 
+bool linear_inequality :: same_direction(linear_inequality & rhs)
+{
+  double left_coeff, right_coeff;
+  for(auto each_pair : this->inequality)
+  {
+    if(each_pair.first > 0)
+    {
+      assert(rhs.inequality.find(each_pair.first) != rhs.inequality.end());
+      left_coeff = each_pair.second;
+      right_coeff = rhs.inequality[each_pair.first];
+      if( fabs(left_coeff - right_coeff) > 1e-3)
+      {
+        return false;
+      }
+    }
+
+  }
+
+  return true;
+}
+
 
 region_constraints :: region_constraints()
 {
   dimension = 0;
   polytope.clear();
+  limits_in_axes_directions.clear();
 }
 
 region_constraints :: region_constraints(int dim)
@@ -103,6 +130,7 @@ region_constraints :: region_constraints(int dim)
   assert(dim > 0);
   dimension = dim;
   polytope.clear();
+  limits_in_axes_directions.clear();
 }
 
 void region_constraints :: set_dimension(int dim)
@@ -136,6 +164,7 @@ void region_constraints :: update( vector< linear_inequality > & region_ineq )
 {
   assert(!region_ineq.empty());
   polytope = region_ineq;
+
 }
 
 bool region_constraints :: check(map< uint32_t, double >  point )
@@ -196,14 +225,12 @@ bool region_constraints :: return_sample(map< uint32_t, double > & point, int se
   unsigned int no_of_tries = 1e5;
 
 
-  // Finding the constraints which actually refer to the main principal directions
-  map< uint32_t, pair< double, double > > limits_in_axes_directions;
-
   int direction, dimension;
 
-
-  limits_in_axes_directions.clear();
-  overapproximate_polyhedron_as_rectangle( limits_in_axes_directions);
+  if(limits_in_axes_directions.empty())
+  {
+    overapproximate_polyhedron_as_rectangle( limits_in_axes_directions);
+  }
 
   point.clear();
 
@@ -219,7 +246,9 @@ bool region_constraints :: return_sample(map< uint32_t, double > & point, int se
       point[axis_limits.first] = limits_in_axes_directions[axis_limits.first].first +
        (double)(
                    (
-                      (double) (rand() % scale) * (datatype)(limits_in_axes_directions[axis_limits.first].second - limits_in_axes_directions[axis_limits.first].first)
+                      (double) (rand() % scale) *
+                      (datatype)(limits_in_axes_directions[axis_limits.first].second -
+                                 limits_in_axes_directions[axis_limits.first].first)
                    )
                     /
                   ((double)scale)
@@ -279,6 +308,9 @@ void region_constraints :: create_region_from_interval(
 
   }
 
+  limits_in_axes_directions = interval;
+
+
   return;
 }
 
@@ -311,6 +343,9 @@ void region_constraints :: overapproximate_polyhedron_as_rectangle(
           direction_vector[each_term_2.first] = 0.0;
         }
       }
+
+      // direction vector belongs to a region constraint
+      // direction return the constant term
 
       direction_vector[each_term_1.first] = -1.0;
       optimize_in_direction(direction_vector, *this, range.first);
@@ -364,6 +399,27 @@ vector<int> region_constraints :: get_input_indices()
 
 }
 
+bool region_constraints :: has(map<uint32_t, double >& direction_vector,
+                                      double & bias_term)
+{
+  map<int, double> buffer_dir;
+  for(auto each_term : direction_vector)
+  {
+    buffer_dir[each_term.first] = each_term.second;
+  }
+  buffer_dir[-1] = 0;
+  linear_inequality test_expr(buffer_dir);
+
+  for(auto each_expr : polytope)
+  {
+    if(each_expr.same_direction(test_expr))
+    {
+      bias_term = each_expr.inequality[-1];
+      return true;
+    }
+  }
+  return false;
+}
 
 bool optimize_in_direction(
   map< uint32_t, double > direction_vector,
