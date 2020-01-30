@@ -114,6 +114,10 @@ class constraints_stack
                                          GRBModel * model_ptr,
                                          set < uint32_t >& nodes_to_explore );
 
+    bool optimize_diff_pwl(computation_graph CG, vector<PolynomialApproximator> const & decomposed_pwls,
+                           vector< double > lower_bounds, vector< double > upper_bounds, uint32_t output_index,
+                           bool direction, map< uint32_t, double >& neuron_value, double & result);
+
 };
 
 class relaxed_constraints_stack : public constraints_stack

@@ -10,6 +10,7 @@ LICENSE : Please see the license file, in the main directory
 */
 
 #include "sherlock.h"
+#include "sherlock_poly.h"
 
 using namespace std;
 using namespace std::chrono;
@@ -18,17 +19,31 @@ int main(int argc, char ** argv)
 {
 	sherlock_parameters.thread_count = 1;
 	sherlock_parameters.do_incremental_constant_search = true;
-	sherlock_parameters.verbose_onnx = true;
-	sherlock_parameters.verbosity = true;
-	sherlock_parameters.grad_search_point_verbosity = true;
-	sherlock_parameters.time_verbosity = true;
+	sherlock_parameters.verbosity = false;
+	sherlock_parameters.grad_search_point_verbosity = false;
+	sherlock_parameters.time_verbosity = false;
 	sherlock_parameters.skip_invariant_guarantees_in_binarization = true;
 	sherlock_parameters.skip_invariant_addition = true;
-	sherlock_parameters.MILP_M = 1e1;
+	sherlock_parameters.MILP_M = 1e4;
+	sherlock_parameters.verbose_onnx = false;
 
-	// string onnx_file = "./network_files/sample_network.onnx";
-	// string onnx_file = "./network_files/squeezenet1.1.onnx";
-	string onnx_file = "./network_files/cifar_network.onnx";
+	string onnx_file = "./network_files/sample_network.onnx";
+	// string onnx_file = "./network_files/cifar_network.onnx";
+	string deep_2_neuron_file = "./network_files/simple_deep_2.onnx";
+
+	computation_graph CG_1;
+	onnx_parser my_parser_1(deep_2_neuron_file);
+	map<string, ParameterValues <uint32_t> > tensor_mapping_1;
+	my_parser_1.build_graph(CG_1, tensor_mapping_1);
+	// for(auto each_pair : tensor_mapping_1)
+	// {
+	// 	cout << each_pair.first << endl;
+	// 	each_pair.second.print();
+	// }
+	test_poly_abstr_simple(CG_1);
+
+
+	exit(0);
 
 	onnx_parser my_parser(onnx_file);
 	computation_graph CG;
@@ -61,17 +76,7 @@ int main(int argc, char ** argv)
 	// sherlock_handler.compute_output_range(output_index, region, output_range);
 	// cout << "Computed output range by Sherlock = [" <<
 	// output_range.first << " , " << output_range.second << " ] " << endl;
-	set< uint32_t > binarized_neurons_1;
-	if(sherlock_handler.prove_bounds(output_index, 8, true, region, binarized_neurons_1))
-	{
-		cout << "Binarization sucessful " << endl;
-		cout << "Neurons binarized : " ;
-		for(auto each_neuron : binarized_neurons_1)
-			cout << " " << each_neuron << " ";
 
-		cout << endl;
-
-	}
 
 	// testing the data structures built on a very small network which can be analysed etc
 	computation_graph sample_graph_a;

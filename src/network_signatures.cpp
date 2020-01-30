@@ -345,6 +345,13 @@ void network_signatures :: learn_implies_relationship(
 }
 
 
+uint32_t generate_random_int(uint32_t range)
+{
+  srand (time(0));
+
+  auto random_number = rand() % range + 1;
+  return random_number;
+}
 
 uint32_t generate_random_int(uint32_t range, uint32_t seed)
 {

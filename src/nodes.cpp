@@ -41,6 +41,7 @@ node :: node(uint32_t node_index, string type_name)
   forward_nodes.clear();
   backward_nodes.clear();
 }
+
 node :: node(uint32_t node_index)
 {
   node_id = node_index;
@@ -273,6 +274,23 @@ map< uint32_t, datatype > node :: return_gradient(void)
     cout << "Node type not included in the list of evaluation functions for derivative ! Exiting....  " << endl;
     exit(0);
   }
+}
+
+node & node :: operator= (const node & rhs)
+{
+  this->node_type = rhs.node_type;
+  this->node_id = rhs.node_id;
+  this->node_name = rhs.node_name;
+  this->current_inputs = rhs.current_inputs;
+  this->current_outputs = rhs.current_outputs;
+  this->current_gradient = rhs.current_gradient;
+  this->bias = rhs.bias;
+  this->constant_val = rhs.constant_val;
+
+  this->forward_nodes = rhs.forward_nodes;
+  this->backward_nodes = rhs.backward_nodes;
+
+  return *this;
 }
 
 

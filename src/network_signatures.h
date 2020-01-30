@@ -9,6 +9,7 @@
 #include "region_constraints.h"
 #include <set>
 #include <assert.h>
+#include <time.h>
 
 typedef map<uint32_t, bool> bit_vector;
 
@@ -42,6 +43,7 @@ public:
                                          set<uint32_t> & off_list);
 
 };
+uint32_t generate_random_int(uint32_t range);
 uint32_t generate_random_int(uint32_t range, uint32_t seed);
 uint32_t generate_random_int_from_set(set< uint32_t >& input_set, uint32_t seed);
 #endif

@@ -64,6 +64,8 @@ struct parameter_values
 
   bool verbose_onnx;
 
+  int mult_fac_for_regression;
+  bool use_gurobi_internal_constraints;
 
 
   parameter_values()
@@ -126,6 +128,9 @@ struct parameter_values
     skip_invariant_guarantees_in_binarization = false;
     verbose_onnx = true;
     skip_invariant_addition = false;
+    mult_fac_for_regression = 20;
+
+    use_gurobi_internal_constraints = false;
 
   }
 

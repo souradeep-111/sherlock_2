@@ -78,7 +78,8 @@ vector<int> ParameterValues <T> :: compute_indices(vector<int> dimension_limits,
   for(int i = 0; i < dimension_values.size(); i++)
   {
     element_limits_count[(dimension_limits.size()-1) - i] = product;
-    product *= dimension_limits[i];
+    product *= dimension_limits[(dimension_limits.size()-1) - i];
+    // product *= dimension_limits[i]
   }
 
   indices.clear();
@@ -759,6 +760,71 @@ void ParameterValues <T>::print()
   cout << endl;
 }
 
+template<class T>
+ParameterValues<T> ParameterValues <T>::return_flatten(int cut_axis)
+{
+
+    assert(!dimension_values.empty());
+    assert(!data_stash.empty());
+
+    vector< int > target_dim(2, 0);
+    if(cut_axis == 0)
+    {
+      target_dim[0] = 1;
+      target_dim[1] = data_stash.size();
+    }
+    else
+    {
+      target_dim.clear();
+      int size = 1;
+      for(int index = 0; index < cut_axis; index++)
+         size *= (dimension_values[index]);
+      target_dim.push_back(size);
+
+      size = 1;
+      for(int index = cut_axis; index < dimension_values.size(); index++)
+         size *= (dimension_values[index]);
+      target_dim.push_back(size);
+    }
+    assert((target_dim[0] * target_dim[1]) == data_stash.size());
+
+    ParameterValues <T> return_value;
+    return_value.dimension_values.clear();
+    return_value.data_stash.clear();
+
+    return_value.data_stash.resize(data_stash.size(), 0);
+    return_value.dimension_values = target_dim;
+
+    vector< int > outer_axis_limits = vector<int>(dimension_values.begin(),
+                                                  dimension_values.begin()+cut_axis);
+
+    vector< int > inner_axis_limits = vector<int>(dimension_values.begin()+cut_axis,
+                                                  dimension_values.end());
+
+    vector< int > orig_indices, outer_orig_indices, inner_orig_indices;
+    vector< int > target_indices;
+
+    for(int data_index = 0; data_index < data_stash.size(); data_index++)
+    {
+      orig_indices = compute_indices(dimension_values ,data_index);
+      outer_orig_indices = vector<int>(orig_indices.begin(), orig_indices.begin() + cut_axis);
+      inner_orig_indices = vector<int>(orig_indices.begin() + cut_axis, orig_indices.end());
+
+      int axis_0 = compute_row_major_index(outer_axis_limits, outer_orig_indices);
+      int axis_1 = compute_row_major_index(inner_axis_limits, inner_orig_indices);
+
+      target_indices.clear();
+      target_indices.push_back(axis_0);
+      target_indices.push_back(axis_1);
+
+      int target_index = compute_row_major_index(target_dim, target_indices);
+      return_value.data_stash[target_index] = data_stash[data_index];
+    }
+
+    return return_value;
+
+}
+
 onnx_parser :: onnx_parser()
 {
   input_filename.clear();
@@ -780,7 +846,7 @@ onnx_parser :: onnx_parser(string filename)
 }
 
 void onnx_parser :: build_graph(computation_graph & CG,
-                                map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes)
+                            map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes)
 {
 
   fstream input(input_filename.c_str(), std::ios::in | std::ios::binary);
@@ -893,8 +959,8 @@ void onnx_parser :: build_graph(computation_graph & CG,
 }
 
 bool onnx_parser :: read_graph_proto(onnx::GraphProto & graph_proto,
-                                     map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
-                                     computation_graph & CG)
+                           map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                           computation_graph & CG)
 {
 
   // read the parameters and their dimensions
@@ -1211,6 +1277,34 @@ int onnx_parser::read_node_proto(onnx::NodeProto & node_proto,
     if(debug_onnx){cout << "Implemented Reshape" << endl;}
     return 1;
   }
+  else if(operator_name.compare(_Transpose_) == 0)
+  {
+    if(debug_onnx){cout << "Implementing Transpose" << endl;}
+    implement_Transpose(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
+    if(debug_onnx){cout << "Implemented Transpose" << endl;}
+    return 1;
+  }
+  else if(operator_name.compare(MatMul) == 0)
+  {
+    if(debug_onnx){cout << "Implementing Matmul" << endl;}
+    implement_MatMul(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
+    if(debug_onnx){cout << "Implemented Matmul" << endl;}
+    return 1;
+  }
+  else if(operator_name.compare(Add) == 0)
+  {
+    if(debug_onnx){cout << "Implementing Add" << endl;}
+    implement_Add(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
+    if(debug_onnx){cout << "Implemented Add" << endl;}
+    return 1;
+  }
+  else if(operator_name.compare(Flatten) == 0)
+  {
+    if(debug_onnx){cout << "Implementing Flatten" << endl;}
+    implement_Flatten(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
+    if(debug_onnx){cout << "Implemented Flatten" << endl;}
+    return 1;
+  }
   else
   {
     cout << "Unrecognized operator type in reading node proto . Exiting... " << endl;
@@ -1325,7 +1419,8 @@ void onnx_parser::implement_Gemm(onnx::NodeProto & node_proto,
   }
   else
   {
-    cout << "Woah, nothing was found in the list, of tensors and node, something is wrong in the onnx reading " << endl;
+    cout << "Woah, nothing was found in the list, of tensors and node,"<<
+    " something is wrong in the onnx reading " << endl;
     exit(0);
   }
 
@@ -2005,10 +2100,10 @@ void onnx_parser::implement_BatchNormalization(onnx::NodeProto & node_proto,
 }
 
 void onnx_parser::implement_MaxPool(onnx :: NodeProto & node_proto,
-                                    map< string, ParameterValues <uint32_t > > & tensor_name_to_nodes,
-                                    map< string, ParameterValues <double > > & parameters_map,
-                                    map< uint32_t, node > & node_id_to_node,
-                                    computation_graph & CG)
+                              map< string, ParameterValues <uint32_t > > & tensor_name_to_nodes,
+                              map< string, ParameterValues <double > > & parameters_map,
+                              map< uint32_t, node > & node_id_to_node,
+                              computation_graph & CG)
 {
 
   string autopad;
@@ -2172,10 +2267,10 @@ void onnx_parser::implement_Constant(onnx:: NodeProto & node_proto,
 }
 
 void onnx_parser::implement_Reshape(onnx:: NodeProto & node_proto,
-                                     map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
-                                     map< string, ParameterValues < double > > & parameters_map,
-                                     map< uint32_t , node> & node_id_to_node,
-                                     computation_graph & CG)
+                             map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                             map< string, ParameterValues < double > > & parameters_map,
+                             map< uint32_t , node> & node_id_to_node,
+                             computation_graph & CG)
 {
   assert(node_proto.input_size() == 2);
   assert(node_proto.output_size() == 1);
@@ -2208,6 +2303,363 @@ void onnx_parser::implement_Reshape(onnx:: NodeProto & node_proto,
     assert(false);
   }
 
+}
+
+void onnx_parser::implement_Transpose(onnx::NodeProto & node_proto,
+                        map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                        map< string, ParameterValues < double > > & parameters_map,
+                        map< uint32_t, node > & node_id_to_node,
+                        computation_graph & CG)
+{
+
+  bool is_a_node_type;
+  uint32_t input_index = 0;
+
+  ParameterValues < uint32_t > input_tensor_nodes;
+  ParameterValues < double > input_tensor_double;
+  string input_tensor_name = node_proto.input(input_index);
+
+  assert(node_proto.output_size() == 1);
+  string output_tensor_name = node_proto.output(0);
+
+  assert(node_proto.input_size() == 1);
+  if(tensor_name_to_nodes.find(node_proto.input(input_index)) != tensor_name_to_nodes.end())
+    is_a_node_type = true;
+  else if(parameters_map.find(node_proto.input(input_index)) != parameters_map.end())
+    is_a_node_type = false;
+  else
+  {
+    cout << "Error in reading the Transpose node, input node name not found !" << endl;
+    cout << "Input node name - " << node_proto.input(input_index) << " exiting.. " << endl;
+    exit(0);
+  }
+
+
+  if(is_a_node_type)
+  {
+    input_tensor_nodes = tensor_name_to_nodes[input_tensor_name];
+    // Making sure it's a 2 dimensional thing
+    assert(input_tensor_nodes.dimension_values.size() == 2);
+    ParameterValues < uint32_t > output_tensor;
+    output_tensor.data_stash = input_tensor_nodes.data_stash;
+    output_tensor.dimension_values =
+    input_tensor_nodes.dimension_values;
+    transpose_matrix< uint32_t > (output_tensor);
+    tensor_name_to_nodes[output_tensor_name] = output_tensor;
+  }
+  else
+  {
+    input_tensor_double = parameters_map[input_tensor_name];
+    // Making sure it's a 2 dimensional thing
+    assert(input_tensor_double.dimension_values.size() == 2);
+    ParameterValues < double > output_tensor;
+    output_tensor.data_stash = input_tensor_double.data_stash;
+    output_tensor.dimension_values =
+    input_tensor_double.dimension_values;
+    transpose_matrix< double > (output_tensor);
+    parameters_map[output_tensor_name] = output_tensor;
+  }
+
+  return;
+
+}
+
+
+void onnx_parser::implement_MatMul(onnx::NodeProto & node_proto,
+                      map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                      map< string, ParameterValues < double > > & parameters_map,
+                      map< uint32_t, node > & node_id_to_node,
+                      computation_graph & CG)
+{
+  // Aims to Y = A * B
+  assert(node_proto.input_size() == 2);
+  assert(node_proto.output_size() == 1);
+
+  bool A_node_type = true;
+  bool B_node_type = true;
+
+  string _input_A_name_ = node_proto.input(0);
+  string _input_B_name_ = node_proto.input(1);
+  string _output_Y_name_ = node_proto.output(0);
+
+  A_node_type = (tensor_name_to_nodes.find(_input_A_name_) != tensor_name_to_nodes.end())?
+                true:false;
+
+  B_node_type = (tensor_name_to_nodes.find(_input_B_name_) != tensor_name_to_nodes.end())?
+                true:false;
+
+  int strip_result_index = -1;
+
+  if(A_node_type && !B_node_type)
+  {
+
+    ParameterValues < uint32_t > variable_A  = tensor_name_to_nodes[_input_A_name_];
+    ParameterValues < double > variable_B = parameters_map[_input_B_name_];
+
+    if((variable_A.dimension_values.size() == 1) &&
+      (variable_B.dimension_values.size() == 2))
+    {
+      vector<int> new_dim;
+      new_dim.push_back(1);
+      new_dim.push_back(variable_A.dimension_values[0]);
+      variable_A.dimension_values = new_dim;
+      strip_result_index = 0;
+    }
+    else if((variable_B.dimension_values.size() == 1) &&
+           (variable_A.dimension_values.size() == 2))
+    {
+      vector<int> new_dim;
+      new_dim.push_back(variable_B.dimension_values[0]);
+      new_dim.push_back(1);
+      variable_B.dimension_values = new_dim;
+      strip_result_index = 1;
+    }
+    else
+    {
+      cout <<"Sizes of variables A and B, are not what is expected " << endl;
+    }
+
+    // Make sure these are really just matrices you are Multiplying
+    assert(variable_A.dimension_values.size() == variable_B.dimension_values.size());
+
+    ParameterValues < uint32_t> result_nodes;
+    nodes_times_weight(1.0, variable_A, variable_B, result_nodes, node_id_to_node, CG);
+
+    // Set the biases to 0
+    for(uint32_t index : result_nodes.data_stash)
+      CG.set_bias_of_node(index, 0.0);
+
+    if(strip_result_index >= 0)
+    {
+      result_nodes.dimension_values.erase(
+        result_nodes.dimension_values.begin() + strip_result_index);
+    }
+    tensor_name_to_nodes[_output_Y_name_] = result_nodes;
+
+  }
+  else if(!A_node_type && B_node_type)
+  {
+
+    ParameterValues < double > variable_A  = parameters_map[_input_A_name_];
+    ParameterValues < uint32_t > variable_B = tensor_name_to_nodes[_input_B_name_];
+
+    if((variable_A.dimension_values.size() == 1) &&
+      (variable_B.dimension_values.size() == 2))
+    {
+      vector<int> new_dim;
+      new_dim.push_back(1);
+      new_dim.push_back(variable_A.dimension_values[0]);
+      variable_A.dimension_values = new_dim;
+    }
+    else if((variable_B.dimension_values.size() == 1) &&
+           (variable_A.dimension_values.size() == 2))
+    {
+      vector<int> new_dim;
+      new_dim.push_back(variable_B.dimension_values[0]);
+      new_dim.push_back(1);
+      variable_B.dimension_values = new_dim;
+    }
+
+    // Make sure these are really just matrices you are Multiplying
+    assert(variable_A.dimension_values.size() == variable_B.dimension_values.size());
+
+    ParameterValues < uint32_t> result_nodes;
+    weight_times_nodes(1.0, variable_A, variable_B, result_nodes, node_id_to_node, CG);
+
+    // Set the biases to 0
+    for(uint32_t index : result_nodes.data_stash)
+      CG.set_bias_of_node(index, 0.0);
+
+    if(strip_result_index >= 0)
+    {
+      result_nodes.dimension_values.erase(
+        result_nodes.dimension_values.begin() + strip_result_index);
+    }
+    tensor_name_to_nodes[_output_Y_name_] = result_nodes;
+  }
+  else if(A_node_type && B_node_type)
+  {
+    cout << "Both A and B are of type node, that cannot be done. " << endl;
+    cout << "Error in type MatMul" << endl;
+    cout << "Exiting... " << endl;
+    exit(0);
+  }
+  else
+  {
+    cout << "Both A and B are of type double hasn't implemented yet." << endl;
+    cout << "Error in type MatMul" << endl;
+    cout << "Exiting... " << endl;
+    exit(0);
+  }
+
+}
+
+void onnx_parser::implement_Add(onnx::NodeProto & node_proto,
+                   map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                   map< string, ParameterValues < double > > & parameters_map,
+                   map< uint32_t, node > & node_id_to_node,
+                   computation_graph & CG)
+{
+
+  // Aims to C = A + B
+  assert(node_proto.input_size() == 2);
+  assert(node_proto.output_size() == 1);
+
+  bool A_node_type = true;
+  bool B_node_type = true;
+
+  string _input_A_name_ = node_proto.input(0);
+  string _input_B_name_ = node_proto.input(1);
+  string _output_Y_name_ = node_proto.output(0);
+
+  A_node_type = (tensor_name_to_nodes.find(_input_A_name_) != tensor_name_to_nodes.end())?
+                true:false;
+
+  B_node_type = (tensor_name_to_nodes.find(_input_B_name_) != tensor_name_to_nodes.end())?
+                true:false;
+
+
+  if(A_node_type && B_node_type)
+  {
+    ParameterValues < uint32_t > input_A = tensor_name_to_nodes[_input_A_name_];
+    ParameterValues < uint32_t > input_B = tensor_name_to_nodes[_input_B_name_];
+
+    ParameterValues < uint32_t > result_nodes;
+    result_nodes.dimension_values.clear();
+    result_nodes.data_stash.clear();
+
+    for(int dim_index = 0; dim_index < input_A.dimension_values.size(); dim_index++)
+      assert(input_A.dimension_values[dim_index] == input_B.dimension_values[dim_index]);
+
+    result_nodes.dimension_values = input_A.dimension_values;
+    for(int index = 0; index < input_A.data_stash.size(); index++)
+    {
+      node_count++;
+      node node_x(node_count, "none");
+      CG.add_new_node(node_count, node_x);
+      result_nodes.data_stash.push_back(node_count);
+      node_id_to_node[node_count] = node_x;
+
+      CG.connect_node1_to_node2_with_weight(input_A.data_stash[index], node_count, 1.0);
+      CG.connect_node1_to_node2_with_weight(input_B.data_stash[index], node_count, 1.0);
+      CG.set_bias_of_node(node_count, 0.0);
+    }
+    tensor_name_to_nodes[_output_Y_name_] = result_nodes;
+  }
+  else if(!A_node_type && B_node_type)
+  {
+    ParameterValues < double > input_A = parameters_map[_input_A_name_];
+    ParameterValues < uint32_t > input_B = tensor_name_to_nodes[_input_B_name_];
+
+    ParameterValues < uint32_t > result_nodes;
+    result_nodes.dimension_values.clear();
+    result_nodes.data_stash.clear();
+
+    for(int dim_index = 0; dim_index < input_A.dimension_values.size(); dim_index++)
+      assert(input_A.dimension_values[dim_index] == input_B.dimension_values[dim_index]);
+
+    result_nodes.dimension_values = input_A.dimension_values;
+    for(int index = 0; index < input_B.data_stash.size(); index++)
+    {
+      node_count++;
+      node node_x(node_count, "none");
+      node_x.set_bias(input_A.data_stash[index]);
+
+      CG.add_new_node(node_count, node_x);
+      result_nodes.data_stash.push_back(node_count);
+      node_id_to_node[node_count] = node_x;
+
+      CG.connect_node1_to_node2_with_weight(input_B.data_stash[index], node_count, 1.0);
+    }
+    tensor_name_to_nodes[_output_Y_name_] = result_nodes;
+
+  }
+  else if(A_node_type && !B_node_type)
+  {
+    ParameterValues < uint32_t > input_A = tensor_name_to_nodes[_input_A_name_];
+    ParameterValues < double > input_B = parameters_map[_input_B_name_];
+
+    ParameterValues < uint32_t > result_nodes;
+    result_nodes.dimension_values.clear();
+    result_nodes.data_stash.clear();
+
+    for(int dim_index = 0; dim_index < input_A.dimension_values.size(); dim_index++)
+      assert(input_A.dimension_values[dim_index] == input_B.dimension_values[dim_index]);
+
+    result_nodes.dimension_values = input_A.dimension_values;
+    for(int index = 0; index < input_B.data_stash.size(); index++)
+    {
+      node_count++;
+      node node_x(node_count, "none");
+      node_x.set_bias(input_B.data_stash[index]);
+
+      CG.add_new_node(node_count, node_x);
+      result_nodes.data_stash.push_back(node_count);
+      node_id_to_node[node_count] = node_x;
+
+      CG.connect_node1_to_node2_with_weight(input_A.data_stash[index], node_count, 1.0);
+    }
+    tensor_name_to_nodes[_output_Y_name_] = result_nodes;
+  }
+  else
+  {
+    ParameterValues < double > input_A = parameters_map[_input_A_name_];
+    ParameterValues < double > input_B = parameters_map[_input_B_name_];
+
+    ParameterValues < double > result_nodes;
+    result_nodes.dimension_values.clear();
+    result_nodes.data_stash.clear();
+
+    for(int dim_index = 0; dim_index < input_A.dimension_values.size(); dim_index++)
+      assert(input_A.dimension_values[dim_index] == input_B.dimension_values[dim_index]);
+
+    for(int index = 0; index < input_B.data_stash.size(); index++)
+    {
+      result_nodes.data_stash.push_back(
+        (input_A.data_stash[index] + input_B.data_stash[index]));
+    }
+
+    parameters_map[_output_Y_name_] = result_nodes;
+  }
+
+}
+
+void onnx_parser::implement_Flatten(onnx::NodeProto & node_proto,
+                    map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                    map< string, ParameterValues < double > > & parameters_map,
+                    map< uint32_t, node > & node_id_to_node,
+                    computation_graph & CG)
+{
+
+  assert(node_proto.attribute_size() == 1);
+  assert(node_proto.input_size() == 1);
+  assert(node_proto.output_size() == 1);
+
+  onnx::AttributeProto attribute_proto = node_proto.attribute(0);
+  assert(attribute_proto.name() == "axis");
+  int cut_axis = attribute_proto.i();
+
+  string input_name = node_proto.input(0);
+  string output_name = node_proto.output(0);
+
+  if(tensor_name_to_nodes.find(input_name) != tensor_name_to_nodes.end())
+  {
+    ParameterValues< uint32_t > input_tensor = tensor_name_to_nodes[input_name];
+    ParameterValues< uint32_t > output_tensor = input_tensor.return_flatten(cut_axis);
+    tensor_name_to_nodes[output_name] = output_tensor;
+  }
+  else if(parameters_map.find(input_name) != parameters_map.end())
+  {
+    ParameterValues< double > input_tensor = parameters_map[input_name];
+    ParameterValues< double > output_tensor = input_tensor.return_flatten(cut_axis);
+    parameters_map[output_name] = output_tensor;
+  }
+  else
+  {
+    cout << "Tensor being searched for in FLATTEN not found ! " << endl;
+    cout << "Tensor name - " << input_name << " .. Exiting.. " << endl;
+    assert(false);
+  }
 }
 
 void reshape_vector(vector< double > reshape_, vector< int > & result)

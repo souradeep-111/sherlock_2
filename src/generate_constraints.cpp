@@ -264,7 +264,11 @@ void constraints_stack :: relate_input_output(node current_node,
   }
   else if(node_type == _relu_)
   {
-    if(!sherlock_parameters.encode_relu_new)
+    if(sherlock_parameters.use_gurobi_internal_constraints)
+    {
+      model_ptr->addGenConstrMax(output_var, & input_var, 1, 0.0, " relu constr " );
+    }
+    else if(!sherlock_parameters.encode_relu_new)
     {
       GRBVar current_node_binary_var;
       if(skip_all_binary_encoding)
@@ -1395,6 +1399,104 @@ void constraints_stack :: check_implies_relationship(
 void constraints_stack :: add_linear_constraint(linear_inequality & lin_ineq)
 {
   lin_ineq.add_this_constraint_to_MILP_model(neurons, model_ptr);
+}
+
+bool constraints_stack :: optimize_diff_pwl(computation_graph CG,
+                                            vector<PolynomialApproximator> const & decomposed_pwls,
+                                            vector< double > lower_bounds, vector< double > upper_bounds,
+                                            uint32_t output_index, bool direction,
+                                            map< uint32_t, double >& neuron_value, double & result)
+{
+  vector< uint32_t > input_node_indices, output_node_indices;
+  CG.return_id_of_input_output_nodes(input_node_indices, output_node_indices);
+
+  vector < GRBVar > input_neuron_variables;
+  for(auto & input_node_index : input_node_indices)
+    input_neuron_variables.push_back(neurons[input_node_index]);
+
+
+
+  GRBVar PWL_output = encode_pwl_models_in_milp(input_neuron_variables.size(), decomposed_pwls, lower_bounds,
+                      upper_bounds, * model_ptr, input_neuron_variables );
+
+
+  neuron_value.clear();
+  GRBLinExpr objective_expr;
+  objective_expr = 0;
+
+  double data = 1.0;
+  objective_expr.addTerms(& data, & PWL_output , 1);
+  // data = -1.0;
+  // objective_expr.addTerms(& data, & neurons[output_index] , 1);
+
+  if(direction)
+     model_ptr->setObjective(objective_expr, GRB_MAXIMIZE);
+  else
+     model_ptr->setObjective(objective_expr, GRB_MINIMIZE);
+
+
+   model_ptr->optimize();
+   model_ptr->update();
+
+   string s = "./Gurobi_file_created/Linear_program.lp";
+   model_ptr->write(s);
+
+   if(model_ptr->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
+   {
+
+       neuron_value.clear();
+       for(auto & some_neuron : neurons)
+       {
+         neuron_value[some_neuron.first] = some_neuron.second.get(GRB_DoubleAttr_X);
+       }
+
+       nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+
+       result = model_ptr->get(GRB_DoubleAttr_ObjVal);
+
+       return true;
+   }
+   else if(model_ptr->get(GRB_IntAttr_Status) == GRB_INFEASIBLE)
+   {
+       neuron_value.clear();
+       nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+       return false;
+   }
+   else if(model_ptr->get(GRB_IntAttr_Status) == GRB_INF_OR_UNBD)
+   {
+     model_ptr->set(GRB_IntParam_DualReductions, 0);
+     model_ptr->update();
+     model_ptr->optimize();
+     if( model_ptr->get(GRB_IntAttr_Status) == GRB_OPTIMAL )
+     {
+         neuron_value.clear();
+         for(auto & some_neuron : neurons)
+         {
+           neuron_value[some_neuron.first] = some_neuron.second.get(GRB_DoubleAttr_X);
+         }
+
+         result = model_ptr->get(GRB_DoubleAttr_ObjVal);
+         nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+         return true;
+     }
+     else if(model_ptr->get(GRB_IntAttr_Status) == GRB_INFEASIBLE)
+     {
+         neuron_value.clear();
+         nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+         return false;
+     }
+   }
+   else
+   {
+       cout << "Some unkown Gurobi flag !" << endl;
+       cout << "Flag returned - " << model_ptr->get(GRB_IntAttr_Status) << endl;
+       assert(false);
+       return false;
+   }
+
+   return false;
+
+
 }
 
 

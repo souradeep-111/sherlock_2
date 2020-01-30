@@ -8,6 +8,8 @@
 #include <queue>
 #include <math.h>
 #include <string>
+#include <limits>
+#include <set>
 #include "computation_graph.h"
 #include "generate_constraints.h"
 #include "configuration.h"
@@ -34,6 +36,14 @@ public:
                       region_constraints & input_region,
                       double & optima_achieved);
 
+  void optimize_node_with_witness(uint32_t node_index,
+                      bool direction, region_constraints & input_region,
+                      double & optima_achieved, _point_& optima_point);
+
+  void maximize_in_direction(linear_inequality & direction,
+                             region_constraints & input_region,
+                             double & result, _point_& optima_point);
+
   void optimize_constrained(uint32_t node_index, bool direction,
                                  region_constraints & input_region,
                                  vector< linear_inequality > & inequalities,
@@ -42,6 +52,11 @@ public:
   void gradient_driven_optimization(uint32_t node_index,
                                     region_constraints & input_region,
                                     bool direction, double & optima);
+
+  void gradient_driven_optimization(uint32_t node_index,
+                          region_constraints & input_region, bool direction,
+                          double & optima, _point_& final_point);
+
   void compute_output_range(uint32_t node_index,
                             region_constraints & input_region,
                             pair < double, double >& output_range);
@@ -50,11 +65,13 @@ public:
 
   void perform_gradient_search(uint32_t node_index, bool direction,
                                 region_constraints & region,
-                                map< uint32_t, double > & starting_point, double & val);
+                                map< uint32_t, double > & starting_point,
+                                double & val);
 
   void perform_gradient_search_with_random_restarts(uint32_t node_index,
                                bool direction, region_constraints & region,
-                               map< uint32_t, double > & starting_point, double & val);
+                               map< uint32_t, double > & starting_point,
+                               double & val);
 
   void compute_output_range_by_sampling(region_constraints & input_region,
                                         uint32_t output_node_index,
@@ -68,8 +85,10 @@ public:
   void increment_point_in_direction(map<uint32_t, double >& current_values,
                                     map<uint32_t, double > direction);
 
-  bool increment_point_in_direction(map<uint32_t, double >& current_values, double step_size,
-                                    map<uint32_t, double > direction, region_constraints& region);
+  bool increment_point_in_direction(map<uint32_t, double >& current_values,
+                                    double step_size,
+                                    map<uint32_t, double > direction,
+                                    region_constraints& region);
 
   bool return_best_effort_random_counter_example(bool direction,
                                     map< uint32_t , double >& current_point,
@@ -79,7 +98,14 @@ public:
   void add_constraint(linear_inequality & lin_ineq);
 
   bool prove_bounds(uint32_t node_index, double bound, bool direction,
-                    region_constraints& input_region, set< uint32_t >& binarized_neurons);
+                    region_constraints& input_region,
+                    set< uint32_t >& binarized_neurons);
+
+  void return_interval_difference_wrt_PWL(
+    map< uint32_t, pair< double, double > > input_interval,
+    vector< datatype>& return_val, uint32_t output_number,
+    vector<PolynomialApproximator> const & decomposed_pwls,
+    vector<double> lower_bounds, vector<double> upper_bounds);
 
 };
 
@@ -89,6 +115,13 @@ void create_computation_graph_from_file(string filename,
                                         bool has_output_relu,
                                         vector<uint32_t>& input_node_indices,
                                         vector<uint32_t>& output_node_indices);
+
+void read_controller_graph(string filename, computation_graph & CG,
+                            bool has_output_relu,
+                            vector < double > scale, vector < double > offset,
+                            vector < uint32_t >& input_node_indices,
+                            vector < uint32_t >& output_node_indices);
+
 
 void test_network_1(computation_graph & CG);
 void test_network_2(computation_graph & CG);

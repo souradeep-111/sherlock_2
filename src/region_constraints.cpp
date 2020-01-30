@@ -18,7 +18,7 @@ linear_inequality :: linear_inequality(int dim)
 
 linear_inequality :: linear_inequality(map< int,  double > & lin_ineq)
 {
-  assert(!lin_ineq.empty());
+  // assert(!lin_ineq.empty());
   dimension = lin_ineq.size() - 1;
   inequality = lin_ineq;
 }
@@ -27,6 +27,19 @@ uint32_t linear_inequality :: get_dim()
 {
   return dimension;
 }
+
+map<int, double > linear_inequality :: get_content()
+{
+  assert(! inequality.empty());
+  return inequality;
+}
+
+void linear_inequality :: update_bias(double bias)
+{
+  assert(!inequality.empty());
+  inequality[-1] = bias;
+}
+
 void linear_inequality :: update(map< int,  double > & lin_ineq)
 {
   assert(!lin_ineq.empty());
@@ -64,16 +77,45 @@ void linear_inequality :: add_this_constraint_to_MILP_model(
 
 }
 
-bool linear_inequality :: if_true(map< uint32_t, double > & point )
+void linear_inequality :: add_equality_constraint_to_MILP_model(
+                                map< uint32_t, GRBVar >& grb_variables,
+                                GRBModel * grb_model)
+{
+  assert(grb_model);
+  assert(!grb_variables.empty());
+
+  GRBVar gurobi_one = grb_model->addVar(1.0, 1.0, 0.0, GRB_CONTINUOUS, "grb_one_input");
+
+  GRBLinExpr expression(0.0);
+  double data;
+
+  for(auto & some_var : grb_variables)
+  {
+    if((some_var.first < 0) || (inequality.find(some_var.first) == inequality.end()))
+    {
+      continue;
+    }
+    data = inequality[some_var.first];
+    expression.addTerms(& data, & grb_variables[some_var.first], 1);
+  }
+
+  data = inequality[-1];
+  expression.addTerms(& data, & gurobi_one, 1);
+
+  grb_model->addConstr(expression, GRB_EQUAL, 0.0, "_equality_constraint_");
+
+}
+
+bool linear_inequality :: if_true( _point_& sample_point)
 {
   assert(!inequality.empty());
   auto sum = 0.0;
   for(auto term : inequality)
   {
-    sum += (point[term.first] * term.second) ;
+    sum += (sample_point[term.first] * term.second) ;
   }
   sum += inequality[-1];
-  return ((sum > 0) ? (true) : (false));
+  return ((sum >= 0.0) ? (true) : (false));
 }
 
 bool linear_inequality :: empty()
@@ -96,8 +138,38 @@ void linear_inequality :: print()
   cout << " ] ";
 }
 
+void linear_inequality :: normalize()
+{
+  double squared_sum = 0.0;
+  double normalizing_term;
+  for(auto each_term : inequality)
+  {
+    if(each_term.first > 0)
+    {
+      squared_sum += (each_term.second * each_term.second);
+    }
+  }
+  normalizing_term = sqrt(squared_sum);
+  assert(normalizing_term > 0.0);
+  for(auto & each_term : inequality)
+  {
+    each_term.second /= normalizing_term;
+  }
+
+}
+
+void linear_inequality :: negate()
+{
+  for(auto & each_term : inequality)
+    each_term.second = -each_term.second;
+
+}
 bool linear_inequality :: same_direction(linear_inequality & rhs)
 {
+
+  this->normalize();
+  rhs.normalize();
+
   double left_coeff, right_coeff;
   for(auto each_pair : this->inequality)
   {
@@ -117,6 +189,30 @@ bool linear_inequality :: same_direction(linear_inequality & rhs)
   return true;
 }
 
+double linear_inequality :: evaluate(_point_& evaluation_point)
+{
+  assert(!inequality.empty());
+  auto sum = 0.0;
+  for(auto term : inequality)
+    sum += (evaluation_point[term.first] * term.second) ;
+
+  sum += inequality[-1];
+  return sum;
+}
+
+void linear_inequality :: get_the_dimension_indices(
+  vector< uint32_t > & indices_involved
+)
+{
+  assert(!inequality.empty());
+  indices_involved.clear();
+  for(auto each_term : inequality)
+  {
+    if(each_term.first > 0)
+      indices_involved.push_back(each_term.first);
+  }
+
+}
 
 region_constraints :: region_constraints()
 {
@@ -167,11 +263,11 @@ void region_constraints :: update( vector< linear_inequality > & region_ineq )
 
 }
 
-bool region_constraints :: check(map< uint32_t, double >  point )
+bool region_constraints :: check(_point_ p)
 {
   for(auto some_linear_inequality : polytope)
   {
-    if(!some_linear_inequality.if_true(point))
+    if(!some_linear_inequality.if_true(p))
     {
       return false;
     }
@@ -209,7 +305,7 @@ int region_constraints :: get_number_of_constraints()
   return polytope.size();
 }
 
-bool region_constraints :: return_sample(map< uint32_t, double > & point, int seed)
+bool region_constraints :: return_sample(_point_ & point, int seed)
 {
   // so, the way it is done here is very simple.
   // First we are finding the centre of the poyhedral from the
@@ -314,6 +410,78 @@ void region_constraints :: create_region_from_interval(
   return;
 }
 
+void region_constraints :: create_region_from_interval(
+                            vector< vector < double > > interval)
+{
+  assert(! interval.empty());
+  uint32_t dimension_index;
+  map < uint32_t, pair< double, double > > buffer;
+  buffer.clear();
+  pair< double, double > limits;
+  dimension_index = 0;
+  while(dimension_index < interval.size())
+  {
+    assert(!interval[dimension_index].empty());
+    limits = make_pair(interval[dimension_index][0], interval[dimension_index][1]);
+    buffer[dimension_index] = limits;
+    dimension_index++;
+  }
+
+  create_region_from_interval(buffer);
+
+}
+
+void region_constraints :: create_region_from_interval(
+  map< uint32_t, pair< double, double > > & interval,
+  map< uint32_t, pair< _point_, _point_ > > & limit_points
+)
+{
+  assert(!interval.empty());
+  assert(!limit_points.empty());
+
+  dimension = interval.size();
+  polytope.clear();
+  contact_points.clear();
+  linear_inequality lin_ineq(dimension);
+
+  map< int, double > coeffs;
+  for(auto node_range_1 : interval)
+  {
+    // add the upper limit
+    coeffs.clear();
+
+    for(auto node_range_2 : interval)
+    {
+      coeffs[node_range_2.first] = 0.0;
+      if(node_range_1.first == node_range_2.first)
+      {
+        coeffs[node_range_2.first] = -1.0;
+        coeffs[-1] = interval[node_range_2.first].second;
+      }
+    }
+    lin_ineq.update(coeffs);
+    polytope.push_back(lin_ineq);
+    contact_points.push_back((limit_points[node_range_1.first]).second);
+
+    // add the lower limit
+    coeffs.clear();
+    for(auto node_range_2 : interval)
+    {
+      coeffs[node_range_2.first] = 0.0;
+      if(node_range_1.first == node_range_2.first)
+      {
+        coeffs[node_range_2.first] = 1.0;
+        coeffs[-1] = -interval[node_range_2.first].first;
+      }
+    }
+    lin_ineq.update(coeffs);
+    polytope.push_back(lin_ineq);
+    contact_points.push_back((limit_points[node_range_1.first]).first);
+  }
+
+  limits_in_axes_directions = interval;
+
+}
 
 void region_constraints :: overapproximate_polyhedron_as_rectangle(
                            map< uint32_t, pair< double, double > >& interval
@@ -420,6 +588,135 @@ bool region_constraints :: has(map<uint32_t, double >& direction_vector,
   }
   return false;
 }
+
+void region_constraints :: set_contact_points(vector< _point_ >& _contact_points_)
+{
+  assert(!_contact_points_.empty());
+  assert(polytope.size() == _contact_points_.size());
+  contact_points = _contact_points_;
+}
+
+void region_constraints :: get_contact_points(vector< _point_ > & _contact_points_)
+{
+  assert(!contact_points.empty());
+  _contact_points_ = contact_points;
+}
+
+void region_constraints :: add_direction_and_contact_point(
+  linear_inequality & buffer_ineq,
+  _point_ & _contact_point_
+)
+{
+  assert(!buffer_ineq.empty());
+  assert(!_contact_point_.empty());
+  assert(_contact_point_.size() == (buffer_ineq.inequality.size() - 1));
+
+  double val = buffer_ineq.evaluate(_contact_point_);
+  assert((val > -sherlock_parameters.tool_zero) && (val < sherlock_parameters.tool_zero)) ;
+
+  polytope.push_back(buffer_ineq);
+  contact_points.push_back(_contact_point_);
+}
+
+void region_constraints :: pick_random_directions(int count,
+                            vector< linear_inequality > & lines,
+                            int input_seed)
+{
+
+  assert(count > 0);
+  assert(polytope.size() > 0);
+  assert(count < polytope.size());
+
+  lines.clear();
+  linear_inequality candidate_line, negation;
+  uint32_t random_index;
+
+
+  int seed = 0;
+  while(lines.size() < count)
+  {
+    seed++;
+    random_index = generate_random_int(polytope.size(), seed + input_seed);
+    random_index--;
+    candidate_line = polytope[random_index];
+    negation = candidate_line;
+    negation.negate();
+
+    bool is_parallel = false;
+    for(auto each_line : lines)
+    {
+      if((each_line.same_direction(candidate_line)) ||
+        (each_line.same_direction(negation)))
+      {
+        is_parallel = true;
+        break;
+      }
+
+    }
+    if(!is_parallel)
+      lines.push_back(candidate_line);
+
+  }
+
+}
+
+void region_constraints :: get_content(vector< linear_inequality > & contents)
+{
+  assert(! polytope.empty());
+  contents = polytope;
+}
+
+
+void print_to_file_in_desmos_format(
+  vector < region_constraints > & all_polyhedrons,
+  string filename
+)
+{
+  setprecision(4);
+  ofstream file;
+  file.open(filename.c_str());
+  vector< linear_inequality > all_halfspaces;
+  map< int, double > inequation;
+
+  int index = 0, dim = 0;
+  for(auto each_polyhedron : all_polyhedrons)
+  {
+    file << "Polyhedron -- " << index << "\n";
+    each_polyhedron.get_content(all_halfspaces);
+    file << "\n";
+    file << "x < " << sherlock_parameters.MILP_M;
+    for(auto each_inequality : all_halfspaces)
+    {
+      inequation = each_inequality.get_content();
+      assert(inequation.size() == 3);
+      // Print each inequality to file
+      //  \left \{ 2x+3y + 4 >0 \right \}
+
+      file << "{";
+      dim = 0;
+      for(auto each_term : inequation)
+      {
+        if(each_term.first > 0)
+        {
+          if(dim == 0)
+            file << each_term.second << "x + ";
+          else if(dim == 1)
+            file << each_term.second << "y + ";
+
+          dim ++;
+        }
+      }
+      file << inequation[-1] << " < 0" << "}";
+    }
+
+    file << "\n";
+    index++;
+  }
+
+  file.close();
+
+}
+
 
 bool optimize_in_direction(
   map< uint32_t, double > direction_vector,

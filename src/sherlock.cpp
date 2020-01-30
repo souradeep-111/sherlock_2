@@ -2,16 +2,29 @@
 
 using namespace std;
 
-bool debug_sherlock = true;
+bool debug_sherlock = false;
 
 sherlock :: sherlock()
 {
   // Pretty much does nothing
+  if(sherlock_parameters.use_gurobi_internal_constraints)
+  {
+    sherlock_parameters.do_incremental_constant_search = false;
+    sherlock_parameters.learn_implies_relation = false;
+    sherlock_parameters.MILP_M = 0.0;
+  }
 }
 
 sherlock :: sherlock(computation_graph & CG)
 {
   neural_network = CG;
+  if(sherlock_parameters.use_gurobi_internal_constraints)
+  {
+    sherlock_parameters.do_incremental_constant_search = false;
+    sherlock_parameters.learn_implies_relation = false;
+    sherlock_parameters.MILP_M = 0.0;
+  }
+
 }
 
 void sherlock :: clear()
@@ -60,6 +73,51 @@ void sherlock :: optimize_node(uint32_t node_index, bool direction,
 
   return;
 
+}
+
+void sherlock :: optimize_node_with_witness(uint32_t node_index,
+              bool direction, region_constraints & input_region,
+              double & optima_achieved, _point_& optima_point
+)
+{
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+
+  if(!sherlock_parameters.skip_invariant_addition)
+  network_constraints.add_invariants(neural_network, input_region);
+
+  gradient_driven_optimization(node_index, input_region, direction, optima_achieved, optima_point);
+  nodes_explored = network_constraints.nodes_explored_last_optimization;
+
+}
+
+void sherlock :: maximize_in_direction(linear_inequality & direction,
+                           region_constraints & input_region,
+                           double & result, _point_& optima_point)
+{
+  computation_graph network_store;
+  network_store = neural_network;
+
+  node node_x(numeric_limits<uint32_t>::max(), "none");
+  neural_network.add_new_node(node_x.get_node_number(), node_x);
+
+
+  map< int, double > connection_details = direction.get_content();
+  node_x.set_bias(connection_details[-1]);
+  for(auto each_pair : connection_details)
+  {
+    if(each_pair.first > 0)
+    {
+      neural_network.connect_node1_to_node2_with_weight(each_pair.first,
+                      node_x.get_node_number(), each_pair.second);
+    }
+  }
+  neural_network.mark_node_as_output(node_x.get_node_number());
+
+  optimize_node_with_witness(node_x.get_node_number(), true, input_region, result, optima_point);
+
+  neural_network = network_store;
 }
 
 void sherlock :: optimize_constrained(uint32_t node_index, bool direction,
@@ -221,6 +279,113 @@ void sherlock :: gradient_driven_optimization(uint32_t node_index,
 
 }
 
+void sherlock :: gradient_driven_optimization(uint32_t node_index,
+                                      region_constraints & input_region, bool direction,
+                                      double & optima, _point_& final_point)
+{
+  vector< uint32_t > indices_of_input_nodes, indices_of_output_nodes;
+  neural_network.return_id_of_input_output_nodes(indices_of_input_nodes, indices_of_output_nodes);
+  double current_optima;
+  map<uint32_t, double > neuron_values, search_point;
+
+  // assert(indices_of_output_nodes.size() == 1);
+  // network_constraints.delete_and_reinitialize();
+  // network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  // network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+  // network_constraints.add_invariants(neural_network, input_region);
+
+  bool res = true;
+
+  if(!input_region.return_sample(search_point, 19))
+  {
+    cout << "Failed to compute random sample, input region might be infeasible " << endl;
+    assert(false);
+  }
+
+
+  current_optima = ((direction) ? (-1e30) : (1e30)) ;
+
+  do{
+    if(sherlock_parameters.verbosity)
+    {
+      cout << "Gradient search starts at : ";
+      print_point(search_point);
+      cout << endl;
+    }
+    if(sherlock_parameters.do_random_restarts)
+    {
+      perform_gradient_search_with_random_restarts(node_index, direction, input_region,
+                                                   search_point, current_optima);
+    }
+    else
+    {
+      perform_gradient_search(node_index, direction, input_region, search_point, current_optima);
+    }
+
+    if(sherlock_parameters.verbosity)
+    {
+      cout << "Gradient search ends at : " << current_optima << "  ";
+      print_point(search_point);
+      cout << endl;
+    }
+
+    neural_network.evaluate_graph(search_point, neuron_values);
+
+    res = network_constraints.optimize_enough(node_index, current_optima, direction, neuron_values);
+    if(!neuron_values.empty())
+    {
+      for(auto input_index : indices_of_input_nodes)
+      {
+        search_point[input_index] = neuron_values[input_index];
+      }
+
+      neural_network.evaluate_graph(search_point, neuron_values);
+      double actual_val = neuron_values[node_index];
+      if(fabs(actual_val - current_optima) > sherlock_parameters.MILP_tolerance)
+      {
+        optimize_node(node_index, direction, input_region, optima);
+        return;
+      }
+    }
+    else if(res)
+    {
+      cout << "Gurobi counter example generation feasible, but didn't return the value " << endl;
+      assert(false);
+    }
+    else
+    {
+      if(sherlock_parameters.grad_search_point_verbosity)
+      {
+        cout << " No Counter example found in Gurobi " << endl;
+      }
+    }
+
+    if(sherlock_parameters.verbosity)
+    {
+      cout << "Nodes explored = " << network_constraints.nodes_explored_last_optimization << endl;
+      cout << "This phase ends at : ";
+      print_point(search_point);
+      cout << endl;
+    }
+
+
+
+  }while(res);
+
+  optima = current_optima;
+
+  if(sherlock_parameters.verbosity)
+  {
+    cout << "The whole search ends at : ";
+    print_point(search_point);
+    cout << endl;
+    cout << "At value = " << optima << endl;
+  }
+
+  final_point = search_point;
+
+}
+
 
 void sherlock :: compute_output_region(region_constraints & input_region,
                                       region_constraints & output_region)
@@ -248,12 +413,8 @@ void sherlock :: perform_gradient_search(uint32_t node_index, bool direction,
   while(improvement > sherlock_parameters.grad_termination_limit)
   {
 
-    cout << "Attempting Gradient computation " << endl;
     /* Do gradient compuutation */
     network_gradient = neural_network.return_gradient_wrt_inputs(node_index, current_point);
-
-    cout << "Gradient computation ends " << endl;
-
 
     if(bad_gradients(network_gradient))
     {
@@ -581,7 +742,62 @@ bool sherlock :: prove_bounds(uint32_t node_index, double bound, bool direction,
                                              neural_network, binarized_neurons);
 }
 
+void sherlock :: return_interval_difference_wrt_PWL(
+  map< uint32_t, pair< double, double > > input_interval,
+  vector< datatype>& return_val,
+  uint32_t output_number,
+  vector<PolynomialApproximator> const & decomposed_pwls,
+  vector<double> lower_bounds,
+  vector<double> upper_bounds)
+{
 
+  region_constraints input_region;
+  input_region.create_region_from_interval(input_interval);
+
+  map< uint32_t, double > neuron_values;
+  double max_val, neg_max_val;
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(
+                      neural_network, input_region);
+  network_constraints.generate_graph_constraints(
+                      input_region, neural_network, output_number);
+
+
+  bool direction = true; // Maximize
+  if(
+     network_constraints.optimize_diff_pwl(neural_network, decomposed_pwls, lower_bounds,
+                          upper_bounds, output_number, direction, neuron_values, max_val)
+    )
+    {
+
+    }
+  else
+  {
+    cout << "Optimization failed , terminating itself ! " << endl;
+    assert(false);
+  }
+
+  direction = false; // Minimize
+  if(
+     network_constraints.optimize_diff_pwl(neural_network, decomposed_pwls, lower_bounds,
+                          upper_bounds, output_number, direction, neuron_values, neg_max_val)
+    )
+    {
+
+    }
+  else
+  {
+    cout << "Optimization failed , terminating itself ! " << endl;
+    assert(false);
+  }
+
+  return_val.clear();
+  return_val.push_back(abs(max_val));
+  return_val.push_back(abs(neg_max_val));
+
+  return;
+
+}
 
 
 void create_computation_graph_from_file(string filename,
@@ -595,6 +811,7 @@ void create_computation_graph_from_file(string filename,
   CG.clear();
   ifstream file;
   file.open(filename.c_str(), ios::in);
+  assert(file.good());
 
   int no_of_inputs, no_of_outputs, no_of_hidden_layers;
   int i, j, k, node_index, no_of_neurons_in_previous_layer;
@@ -692,6 +909,131 @@ void create_computation_graph_from_file(string filename,
 
 }
 
+void read_controller_graph(string filename, computation_graph & CG,
+      bool has_output_relu,
+      vector < double > scale, vector < double > offset,
+      vector < uint32_t >& input_node_indices,
+      vector < uint32_t >& output_node_indices)
+{
+  input_node_indices.clear();
+  output_node_indices.clear();
+  CG.clear();
+  ifstream file;
+  file.open(filename.c_str(), ios::in);
+  assert(file.good());
+
+  int no_of_inputs, no_of_outputs, no_of_hidden_layers;
+  int i, j, k, node_index, no_of_neurons_in_previous_layer;
+  vector < uint32_t > indices_of_previous_layer_nodes, indices_of_current_layer_nodes;
+
+  double buffer;
+  file >> buffer; no_of_inputs = (int) buffer;
+  file >> buffer; no_of_outputs = (int) buffer;
+  file >> buffer; no_of_hidden_layers = (int) buffer;
+
+  vector< uint32_t > network_configuration;
+  i = 0;
+  while(i < no_of_hidden_layers)
+  {
+    file >> buffer;
+    network_configuration.push_back((uint32_t) buffer);
+    i++;
+  }
+
+
+  node_index = 1;
+
+  // Creating the input nodes, and adding them to the computation graph
+  indices_of_previous_layer_nodes.clear();
+  i = 0;
+  while(i < no_of_inputs )
+  {
+    node node_x(node_index, "constant");
+    CG.add_new_node(node_index, node_x);
+    CG.mark_node_as_input(node_index);
+    indices_of_previous_layer_nodes.push_back(node_index);
+    input_node_indices.push_back(node_index);
+    node_index ++;
+    i++;
+  }
+  // Reading the hidden neurons if any
+  for( i = 0; i < no_of_hidden_layers; i++)
+  {
+    indices_of_current_layer_nodes.clear();
+    for( j = 0 ; j < network_configuration[i] ; j++ )
+    {
+      node node_x(node_index, "relu");
+      CG.add_new_node(node_index, node_x);
+      indices_of_current_layer_nodes.push_back(node_index);
+
+      no_of_neurons_in_previous_layer = ((i == 0) ? (no_of_inputs):(network_configuration[i-1])) ;
+      assert(no_of_neurons_in_previous_layer == indices_of_previous_layer_nodes.size());
+      // Reading the weights
+      for(k = 0; k < no_of_neurons_in_previous_layer; k++)
+      {
+        file >> buffer;
+        CG.connect_node1_to_node2_with_weight(indices_of_previous_layer_nodes[k], node_index, buffer);
+      }
+      // Reading the bias
+      file >> buffer;
+      CG.set_bias_of_node(node_index, buffer);
+      node_index ++;
+    }
+    indices_of_previous_layer_nodes = indices_of_current_layer_nodes;
+  }
+
+
+  // Reading the output mapping
+  for( j = 0 ; j < no_of_outputs ; j++ )
+  {
+    string node_type = (has_output_relu) ? ("relu") : ("none");
+
+    node node_x(node_index, node_type);
+    CG.add_new_node(node_index, node_x);
+
+    no_of_neurons_in_previous_layer = network_configuration[no_of_hidden_layers - 1] ;
+    // Reading the weights
+    for(k = 0; k < no_of_neurons_in_previous_layer; k++)
+    {
+      file >> buffer;
+      CG.connect_node1_to_node2_with_weight(indices_of_previous_layer_nodes[k], node_index, buffer);
+    }
+    // Reading the bias
+    file >> buffer;
+    CG.set_bias_of_node(node_index, buffer);
+    output_node_indices.push_back(node_index);
+    node_index ++;
+  }
+
+  vector < uint32_t > new_output_node_indices;
+  double shift, mult;
+  // Adjusting for the scaling and buffer
+  for(j = 0; j < no_of_outputs; j++)
+  {
+
+    if( (!scale.empty()) && (!offset.empty()) )
+    {
+      shift = offset[j];
+      mult  = scale[j];
+    }
+    else
+    {
+      shift = 0.0;
+      mult  = 1.0;
+    }
+
+    string node_type = "none";
+    node node_x(node_index, node_type);
+    CG.add_new_node(node_index, node_x);
+    CG.mark_node_as_output(node_index);
+    CG.connect_node1_to_node2_with_weight(output_node_indices[j], node_index, mult);
+    CG.set_bias_of_node(node_index, shift);
+    new_output_node_indices.push_back(node_index);
+    node_index ++;
+  }
+  output_node_indices = new_output_node_indices;
+
+}
 
 void test_network_1(computation_graph & CG)
 {

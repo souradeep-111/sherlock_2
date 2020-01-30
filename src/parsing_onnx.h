@@ -22,6 +22,13 @@
 
 using namespace std;
 
+// Roughly speaking this is the list of operators that has been implemented
+// in Sherlock's Format
+
+// The naming of the different operators here, are exactly in line with the documentation
+// in ONNX format description. The webpage that might be useful here is the
+// following : https://github.com/onnx/onnx/blob/master/docs/Operators.md
+
 const string Gemm("Gemm");
 const string Relu("Relu");
 const string Conv("Conv");
@@ -30,6 +37,11 @@ const string BatchNormalization("BatchNormalization");
 const string MaxPool("MaxPool");
 const string Constant("Constant");
 const string Reshape("Reshape");
+const string _Transpose_("Transpose");
+// The above weird naming is because Eigen has a similar name
+const string MatMul("MatMul");
+const string Add("Add");
+const string Flatten("Flatten");
 
 typedef vector< uint32_t > _id_list_;
 typedef vector< int > _shape_;
@@ -118,6 +130,8 @@ public:
   ParameterValues<T> & operator= (const ParameterValues<T> & p_values);
 
   void print();
+
+  ParameterValues <T> return_flatten(int cut_axis);
 };
 
 class onnx_parser
@@ -157,6 +171,25 @@ public:
                       map < string, ParameterValues < double > > & parameters_map,
                       map < uint32_t, node > & node_id_to_node,
                       computation_graph & CG);
+
+  void implement_Transpose(onnx::NodeProto & node_proto,
+                          map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                          map< string, ParameterValues < double > > & parameters_map,
+                          map< uint32_t, node > & node_id_to_node,
+                          computation_graph & CG);
+
+  void implement_MatMul(onnx::NodeProto & node_proto,
+                        map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                        map< string, ParameterValues < double > > & parameters_map,
+                        map< uint32_t, node > & node_id_to_node,
+                        computation_graph & CG);
+
+  void implement_Add(onnx::NodeProto & node_proto,
+                     map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                     map< string, ParameterValues < double > > & parameters_map,
+                     map< uint32_t, node > & node_id_to_node,
+                     computation_graph & CG);
+
 
   void implement_Gemm(onnx::NodeProto & node_proto,
                      map< string, ParameterValues < uint32_t > > & tensor_names_to_nodes,
@@ -205,6 +238,12 @@ public:
                          map< string, ParameterValues < double > > & parameters_map,
                          map< uint32_t , node> & node_id_to_node,
                          computation_graph & CG);
+
+   void implement_Flatten(onnx::NodeProto & node_proto,
+                       map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                       map< string, ParameterValues < double > > & parameters_map,
+                       map< uint32_t, node > & node_id_to_node,
+                       computation_graph & CG);
 
    void weight_times_nodes( double scaling_factor,
                             ParameterValues <double> weight_values,
