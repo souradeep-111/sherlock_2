@@ -52,6 +52,11 @@ void computation_graph :: mark_node_as_output(uint32_t node_id)
   no_of_output_nodes++;
 }
 
+void computation_graph :: clear_output_nodes()
+{
+  output_nodes.clear();
+}
+
 string computation_graph :: return_node_position(uint32_t node_index)
 {
   if(find(input_nodes.begin(), input_nodes.end(), node_index) != input_nodes.end())
@@ -148,8 +153,6 @@ void evaluate_node(computation_graph & c_graph, uint32_t node_id ,
     current_node.get_backward_connections(backward_connections_);
     backward_connections = backward_connections_;
     mtx.unlock();
-
-
 
 
     vector< thread > vector_of_threads_created;

@@ -1,6 +1,6 @@
 #include "network_signatures.h"
 
-bool debug_net_sig = true;
+bool debug_net_sig = false;
 network_signatures :: network_signatures()
 {
     signatures.clear();

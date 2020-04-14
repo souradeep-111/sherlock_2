@@ -113,7 +113,10 @@ class region_constraints
 // );
 
 extern uint32_t generate_random_int(uint32_t);
-extern uint32_t generate_random_int(uint32_t, uint32_t);
+extern uint32_t generate_random_int(uint32_t, uint32_t seed);
+extern uint32_t generate_random_int_from_set(set< uint32_t > & input_set,
+                                             uint32_t seed);
+
 bool optimize_in_direction(
   map< uint32_t, double > direction_vector,
   region_constraints & region,
@@ -123,5 +126,7 @@ void print_polyhedrons_in_desmos_format(
   vector < region_constraints > & all_polyhedrons,
   string filename
 );
+
+
 
 #endif

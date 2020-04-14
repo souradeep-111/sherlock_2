@@ -26,10 +26,13 @@ int main(int argc, char ** argv)
 	sherlock_parameters.skip_invariant_addition = true;
 	sherlock_parameters.MILP_M = 1e4;
 	sherlock_parameters.verbose_onnx = false;
+	sherlock_parameters.use_gurobi_internal_constraints = true;
+	sherlock_parameters.find_extra_directions = true;
 
 	string onnx_file = "./network_files/sample_network.onnx";
 	// string onnx_file = "./network_files/cifar_network.onnx";
 	string deep_2_neuron_file = "./network_files/simple_deep_2.onnx";
+	string nnet_to_onnx = "./automating_run/ACASXU_experimental_v2a_1_1.onnx";
 
 	computation_graph CG_1;
 	onnx_parser my_parser_1(deep_2_neuron_file);
@@ -41,6 +44,18 @@ int main(int argc, char ** argv)
 	// 	each_pair.second.print();
 	// }
 	test_poly_abstr_simple(CG_1);
+
+	exit(0);
+
+	computation_graph CG_2;
+	onnx_parser my_parser_2(nnet_to_onnx);
+	map<string, ParameterValues <uint32_t> > tensor_mapping_2;
+	my_parser_2.build_graph(CG_2, tensor_mapping_2);
+	for(auto each_pair : tensor_mapping_2)
+	{
+		cout << each_pair.first << endl;
+		each_pair.second.print();
+	}
 
 
 	exit(0);
@@ -134,11 +149,13 @@ int main(int argc, char ** argv)
 
 	sherlock_handler.optimize_constrained(7, true, region, collection, max);
 	sherlock_handler.optimize_constrained(7, false, region, collection, min);
-	cout << "Constrained output range computed by Sherlock = [" << min << " , " << max << " ] " << endl;
+	cout << "Constrained output range computed by Sherlock = ["
+	<< min << " , " << max << " ] " << endl;
 
 	cout << "Starting selective binarization : " << endl;
 	set< uint32_t > binarized_neurons;
-	if(sherlock_handler.prove_bounds(7, output_range.second + 1, true, region, binarized_neurons))
+	if(sherlock_handler.prove_bounds(7, output_range.second + 1, true,
+		region, binarized_neurons))
 	{
 		cout << "Binarization sucessful " << endl;
 		cout << "Neurons binarized : " ;

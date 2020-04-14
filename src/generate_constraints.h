@@ -146,6 +146,8 @@ class relaxed_constraints_stack : public constraints_stack
                                               set< uint32_t > & off_neurons,
                                               network_signatures & network_signature);
 
+    void add_node_values(map< uint32_t, double > & );
+    bool check_satisfaction(map<uint32_t, double > & input_witness);
 
 };
 

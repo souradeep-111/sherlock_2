@@ -75,6 +75,36 @@ void sherlock :: optimize_node(uint32_t node_index, bool direction,
 
 }
 
+void sherlock :: optimize_node(uint32_t node_index, bool direction,
+                               region_constraints & input_region,
+                               double & optima_achieved, _point_ & optima_point)
+{
+  map< uint32_t, double > neuron_values;
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(
+                      neural_network, input_region);
+  network_constraints.generate_graph_constraints(
+                      input_region, neural_network, node_index);
+
+  if( network_constraints.optimize(node_index, direction, neuron_values, optima_achieved) )
+  {
+    vector< uint32_t> input_nodes, output_nodes;
+    neural_network.return_id_of_input_output_nodes(input_nodes, output_nodes);
+    for(auto index:input_nodes)
+      optima_point[index] = neuron_values[index];
+
+    return;
+  }
+  else
+  {
+    cout << "Optimization failed , terminating itself ! " << endl;
+    assert(false);
+  }
+
+  return;
+
+}
+
 void sherlock :: optimize_node_with_witness(uint32_t node_index,
               bool direction, region_constraints & input_region,
               double & optima_achieved, _point_& optima_point
@@ -87,7 +117,8 @@ void sherlock :: optimize_node_with_witness(uint32_t node_index,
   if(!sherlock_parameters.skip_invariant_addition)
   network_constraints.add_invariants(neural_network, input_region);
 
-  gradient_driven_optimization(node_index, input_region, direction, optima_achieved, optima_point);
+  // gradient_driven_optimization(node_index, input_region, direction, optima_achieved, optima_point);
+  optimize_node(node_index, direction, input_region, optima_achieved, optima_point);
   nodes_explored = network_constraints.nodes_explored_last_optimization;
 
 }
@@ -170,6 +201,38 @@ void sherlock :: compute_output_range(uint32_t node_index,
   // Minimizing :
   gradient_driven_optimization(node_index, input_region, false, output_range.first);
   nodes_explored += network_constraints.nodes_explored_last_optimization;
+
+}
+
+void sherlock :: optimize_using_gradient(uint32_t node_index,
+                    region_constraints & input_region, bool direction,
+                    double & optima)
+{
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+
+  if(!sherlock_parameters.skip_invariant_addition)
+  network_constraints.add_invariants(neural_network, input_region);
+
+  gradient_driven_optimization(node_index, input_region, direction, optima);
+  nodes_explored = network_constraints.nodes_explored_last_optimization;
+
+}
+
+void sherlock :: optimize_using_gradient(uint32_t node_index,
+                    region_constraints & input_region, bool direction,
+                    double & optima, _point_ & final_point)
+{
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+
+  if(!sherlock_parameters.skip_invariant_addition)
+  network_constraints.add_invariants(neural_network, input_region);
+
+  gradient_driven_optimization(node_index, input_region, direction, optima, final_point);
+  nodes_explored = network_constraints.nodes_explored_last_optimization;
 
 }
 
@@ -343,7 +406,7 @@ void sherlock :: gradient_driven_optimization(uint32_t node_index,
       double actual_val = neuron_values[node_index];
       if(fabs(actual_val - current_optima) > sherlock_parameters.MILP_tolerance)
       {
-        optimize_node(node_index, direction, input_region, optima);
+        optimize_node_with_witness(node_index, direction, input_region, optima, final_point);
         return;
       }
     }
@@ -386,6 +449,76 @@ void sherlock :: gradient_driven_optimization(uint32_t node_index,
 
 }
 
+bool sherlock :: gradient_driven_target(uint32_t node_index,
+                                      region_constraints & input_region, bool direction,
+                                      double target, _point_& final_point)
+{
+  network_constraints.delete_and_reinitialize();
+  network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+
+  vector< uint32_t > indices_of_input_nodes, indices_of_output_nodes;
+  neural_network.return_id_of_input_output_nodes(indices_of_input_nodes, indices_of_output_nodes);
+  double current_optima;
+  map<uint32_t, double > neuron_values, search_point;
+
+  // assert(indices_of_output_nodes.size() == 1);
+  // network_constraints.delete_and_reinitialize();
+  // network_constraints.create_the_input_overapproximation_for_each_neuron(neural_network, input_region);
+  // network_constraints.generate_graph_constraints(input_region, neural_network, node_index);
+  // network_constraints.add_invariants(neural_network, input_region);
+
+  bool res = true;
+
+  if(!input_region.return_sample(search_point, 19))
+  {
+    cout << "Failed to compute random sample, input region might be infeasible " << endl;
+    assert(false);
+  }
+
+
+  current_optima = ((direction) ? (-1e30) : (1e30)) ;
+  int trial_index = 1;
+
+
+  if(sherlock_parameters.verbosity)
+  {
+    cout << "Gradient search starts at : ";
+    print_point(search_point);
+    cout << endl;
+  }
+  if(sherlock_parameters.do_random_restarts)
+  {
+    perform_gradient_search_with_random_restarts(node_index, direction, input_region,
+                                                 search_point, current_optima);
+  }
+  else
+  {
+    perform_gradient_search(node_index, direction, input_region, search_point, current_optima);
+  }
+
+  if(sherlock_parameters.verbosity)
+  {
+    cout << "Gradient search ends at : " << current_optima << "  ";
+    print_point(search_point);
+    cout << endl;
+  }
+
+  neural_network.evaluate_graph(search_point, neuron_values);
+
+  if( ((direction) && (current_optima > target)) ||
+     ((!direction) && (current_optima < target)))
+  {
+    final_point = search_point;
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+
+
+}
 
 void sherlock :: compute_output_region(region_constraints & input_region,
                                       region_constraints & output_region)
@@ -740,6 +873,32 @@ bool sherlock :: prove_bounds(uint32_t node_index, double bound, bool direction,
   selective_binarization nn_constraints;
   return nn_constraints.perform_binarization(node_index, bound, direction,  input_region,
                                              neural_network, binarized_neurons);
+}
+
+bool sherlock :: check_satisfaction(region_constraints & input_region,
+                        map< uint32_t, double >& output_assignment,
+                        map< uint32_t, double >& input_assignment)
+{
+  assert(!output_assignment.empty());
+
+  relaxed_constraints_stack layer_constraints;
+  map< uint32_t, double > neuron_values;
+  layer_constraints.delete_and_reinitialize();
+
+  layer_constraints.create_the_input_overapproximation_for_each_neuron(
+                  neural_network, input_region);
+
+  set< uint32_t > set_of_output_nodes;
+  for(auto node_values : output_assignment)
+    set_of_output_nodes.insert(node_values.first);
+
+  layer_constraints.generate_graph_constraints(input_region, neural_network,
+                                               set_of_output_nodes);
+  layer_constraints.add_node_values(output_assignment);
+
+  bool res = layer_constraints.check_satisfaction(input_assignment);
+
+  return res;
 }
 
 void sherlock :: return_interval_difference_wrt_PWL(
@@ -1264,5 +1423,86 @@ void test_network_tanh(computation_graph & CG)
   CG.connect_node1_to_node2_with_weight(5,7,0.5);
   CG.connect_node1_to_node2_with_weight(6,7,0.5);
   CG.set_bias_of_node(7, 0.0);
+
+}
+
+
+void print_polyhedron_using_python(
+  region_constraints & input_polyhedron,
+  computation_graph & neural_network,
+  region_constraints & output_polyhedron,
+  string filename
+)
+{
+  setprecision(4);
+  ofstream file;
+  file.open(filename.c_str());
+  string s;
+  int index;
+
+  int number_of_samples = 5000;
+  map< uint32_t, double > input_sample, internal_sample, ov_apr_sample;
+
+  assert(input_polyhedron.get_space_dimension() == 2);
+  if(output_polyhedron.get_space_dimension() == 1)
+    return;
+  else
+    assert(output_polyhedron.get_space_dimension() == 2);
+
+  s = "import matplotlib.pyplot as plt";
+  file << s << "\n";
+
+  s = "import numpy as np";
+  file << s << "\n";
+
+  s  = "internal_points_x = []";
+  file << s << "\n";
+  s  = "internal_points_y = []";
+  file << s << "\n";
+
+  s  = "over_approx_points_x = []";
+  file << s << "\n";
+  s  = "over_approx_points_y = []";
+  file << s << "\n";
+
+  vector < int > input_dims = input_polyhedron.get_input_indices();
+  vector < int > output_dims = output_polyhedron.get_input_indices();
+
+
+  index = 0;
+  while(index < number_of_samples)
+  {
+    // Get a sample in the output space and push it in
+    output_polyhedron.return_sample(ov_apr_sample, index);
+    assert(!ov_apr_sample.empty());
+    s = "over_approx_points_x.append(" + to_string(ov_apr_sample[output_dims[0]])  + ")";
+    file << s << "\n";
+    s = "over_approx_points_y.append(" + to_string(ov_apr_sample[output_dims[1]])  + ")";
+    file << s << "\n";
+
+
+    // Get a sample in the input space, compute the output map and push it in
+    input_polyhedron.return_sample(input_sample, index);
+    neural_network.evaluate_graph(input_sample, internal_sample);
+    assert(!internal_sample.empty());
+    s = "internal_points_x.append(" + to_string(internal_sample[output_dims[0]])  + ")";
+    file << s << "\n";
+    s = "internal_points_y.append(" + to_string(internal_sample[output_dims[1]])  + ")";
+    file << s << "\n";
+
+    index ++;
+  }
+
+
+  s = "plt.scatter(over_approx_points_x, over_approx_points_y, c='red')";
+  file << s << "\n";
+
+  s = "plt.scatter(internal_points_x, internal_points_y, c='blue')";
+  file << s << "\n";
+
+  s = "plt.savefig(\"image.png\")";
+  file << s << "\n";
+
+  file.close();
 
 }

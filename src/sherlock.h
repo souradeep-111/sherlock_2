@@ -49,6 +49,10 @@ public:
                                  vector< linear_inequality > & inequalities,
                                  double & optima_achieved);
 
+  void optimize_node(uint32_t node_index, bool direction,
+                     region_constraints & input_region,
+                     double & optima_achieved, _point_ & optima_point);
+
   void gradient_driven_optimization(uint32_t node_index,
                                     region_constraints & input_region,
                                     bool direction, double & optima);
@@ -56,6 +60,16 @@ public:
   void gradient_driven_optimization(uint32_t node_index,
                           region_constraints & input_region, bool direction,
                           double & optima, _point_& final_point);
+
+  void optimize_using_gradient(uint32_t node_index,
+                      region_constraints & input_region, bool direction,
+                      double & optima);
+  void optimize_using_gradient(uint32_t node_index,
+                      region_constraints & input_region, bool direction,
+                      double & optima, _point_ & final_point);
+  bool gradient_driven_target(uint32_t node_index,
+                              region_constraints & input_region, bool direction,
+                              double target, _point_& final_point);
 
   void compute_output_range(uint32_t node_index,
                             region_constraints & input_region,
@@ -101,6 +115,10 @@ public:
                     region_constraints& input_region,
                     set< uint32_t >& binarized_neurons);
 
+  bool check_satisfaction(region_constraints & input_region,
+                          map< uint32_t, double >& output_assignment,
+                          map< uint32_t, double >& input_assignment);
+
   void return_interval_difference_wrt_PWL(
     map< uint32_t, pair< double, double > > input_interval,
     vector< datatype>& return_val, uint32_t output_number,
@@ -122,6 +140,12 @@ void read_controller_graph(string filename, computation_graph & CG,
                             vector < uint32_t >& input_node_indices,
                             vector < uint32_t >& output_node_indices);
 
+void print_polyhedron_using_python(
+  region_constraints & input_polyhedron,
+  computation_graph & neural_network,
+  region_constraints & output_polyhedron,
+  string filename
+);
 
 void test_network_1(computation_graph & CG);
 void test_network_2(computation_graph & CG);

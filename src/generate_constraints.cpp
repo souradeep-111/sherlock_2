@@ -11,6 +11,7 @@ constraints_stack :: constraints_stack()
   env_ptr->set(GRB_IntParam_OutputFlag, 0);
   model_ptr = new GRBModel(*env_ptr);
   model_ptr->set(GRB_DoubleParam_IntFeasTol, sherlock_parameters.int_tolerance);
+  model_ptr->set(GRB_DoubleParam_TimeLimit, sherlock_parameters.timeout_seconds);
   neurons.clear();
   binaries.clear();
 
@@ -817,7 +818,6 @@ bool constraints_stack :: optimize(uint32_t node_index, bool direction,
 
   objective_expr.addTerms(& data, & neurons[node_index] , 1);
 
-
    if(direction)
    {
      model_ptr->setObjective(objective_expr, GRB_MAXIMIZE);
@@ -916,6 +916,7 @@ bool constraints_stack :: optimize_enough(uint32_t node_index,
                                           double& current_optima, bool direction,
                                           map< uint32_t, double >& neuron_value)
 {
+
   GRBLinExpr objective_expr;
   objective_expr = 0;
   double data = 1.0;
@@ -924,18 +925,17 @@ bool constraints_stack :: optimize_enough(uint32_t node_index,
 
    if(direction)
    {
-     data = current_optima + sherlock_parameters.MILP_tolerance;
+     double buffer = current_optima + sherlock_parameters.MILP_tolerance;
      model_ptr->getEnv().set(GRB_IntParam_SolutionLimit, 1);
-     model_ptr->getEnv().set(GRB_DoubleParam_Cutoff, data);
-
+     model_ptr->getEnv().set(GRB_DoubleParam_Cutoff, buffer);
      model_ptr->setObjective(objective_expr, GRB_MAXIMIZE);
    }
    else
    {
-     data = current_optima - sherlock_parameters.MILP_tolerance;
-     model_ptr->getEnv().set(GRB_IntParam_SolutionLimit, 1);
-     model_ptr->getEnv().set(GRB_DoubleParam_Cutoff, data);
 
+     double buffer = current_optima - sherlock_parameters.MILP_tolerance;
+     model_ptr->getEnv().set(GRB_IntParam_SolutionLimit, 1);
+     model_ptr->getEnv().set(GRB_DoubleParam_Cutoff, buffer);
      model_ptr->setObjective(objective_expr, GRB_MINIMIZE);
    }
 
@@ -1000,6 +1000,13 @@ bool constraints_stack :: optimize_enough(uint32_t node_index,
          nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
          return false;
      }
+   }
+   else if(model_ptr->get(GRB_IntAttr_Status) == GRB_TIME_LIMIT)
+   {
+     cout << "------- Time out happened -------- " << endl;
+     neuron_value.clear();
+     nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+     return false;
    }
    else
    {
@@ -1807,6 +1814,75 @@ void relaxed_constraints_stack :: search_constant_nodes_incrementally(computatio
   }
 
 
+}
+
+void relaxed_constraints_stack :: add_node_values(map< uint32_t, double > & node_vals)
+{
+  assert(!node_vals.empty());
+  for(auto each_val_pair : node_vals)
+    model_ptr->addConstr(neurons[each_val_pair.first], GRB_EQUAL, each_val_pair.second, "setting the val constraint");
+
+}
+
+bool relaxed_constraints_stack :: check_satisfaction(map<uint32_t, double > & input_witness)
+{
+   GRBLinExpr objective_expr;
+   objective_expr = 0;
+   model_ptr->setObjective(objective_expr, GRB_MAXIMIZE);
+   model_ptr->optimize();
+   model_ptr->update();
+
+   // string s = "./Gurobi_file_created/Linear_program.lp";
+   // model_ptr->write(s);
+
+
+   if(model_ptr->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
+   {
+     input_witness.clear();
+     for(auto & some_neuron : neurons)
+     {
+       input_witness[some_neuron.first] = some_neuron.second.get(GRB_DoubleAttr_X);
+     }
+     nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+     return true;
+
+   }
+   else if(model_ptr->get(GRB_IntAttr_Status) == GRB_INFEASIBLE)
+   {
+       return false;
+   }
+   else if(model_ptr->get(GRB_IntAttr_Status) == GRB_INF_OR_UNBD)
+   {
+     model_ptr->set(GRB_IntParam_DualReductions, 0);
+     model_ptr->update();
+     model_ptr->optimize();
+     if(model_ptr->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
+     {
+       input_witness.clear();
+       for(auto & some_neuron : neurons)
+       {
+         input_witness[some_neuron.first] = some_neuron.second.get(GRB_DoubleAttr_X);
+       }
+       nodes_explored_last_optimization = model_ptr->get(GRB_DoubleAttr_NodeCount);
+       return true;
+
+     }
+     else if(model_ptr->get(GRB_IntAttr_Status) == GRB_INFEASIBLE)
+     {
+       return false;
+     }
+
+   }
+   else
+   {
+       cout << "Some unkown Gurobi flag !" << endl;
+       cout << "Flag returned - " << model_ptr->get(GRB_IntAttr_Status) << endl;
+
+       assert(false);
+       return false;
+   }
+
+   return false;
 }
 
 template <typename T>

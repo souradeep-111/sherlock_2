@@ -194,7 +194,13 @@ double linear_inequality :: evaluate(_point_& evaluation_point)
   assert(!inequality.empty());
   auto sum = 0.0;
   for(auto term : inequality)
-    sum += (evaluation_point[term.first] * term.second) ;
+  {
+    if(term.first > 0)
+    {
+      assert(evaluation_point.find(term.first) != evaluation_point.end());
+      sum += (evaluation_point[term.first] * term.second) ;
+    }
+  }
 
   sum += inequality[-1];
   return sum;
@@ -259,6 +265,10 @@ void region_constraints :: add(vector< linear_inequality > & region_ineq)
 void region_constraints :: update( vector< linear_inequality > & region_ineq )
 {
   assert(!region_ineq.empty());
+  vector< uint32_t > dimension_indices;
+  region_ineq[0].get_the_dimension_indices(dimension_indices);
+  dimension = dimension_indices.size();
+
   polytope = region_ineq;
 
 }
@@ -328,28 +338,31 @@ bool region_constraints :: return_sample(_point_ & point, int seed)
     overapproximate_polyhedron_as_rectangle( limits_in_axes_directions);
   }
 
+
   point.clear();
 
   k = 0;
   while( k < no_of_tries)
   {
-    srand(k + seed);
+    // srand(k + seed);
 
     point.clear();
 
     for(auto axis_limits : limits_in_axes_directions)
     {
-      point[axis_limits.first] = limits_in_axes_directions[axis_limits.first].first +
-       (double)(
-                   (
-                      (double) (rand() % scale) *
-                      (datatype)(limits_in_axes_directions[axis_limits.first].second -
-                                 limits_in_axes_directions[axis_limits.first].first)
-                   )
-                    /
-                  ((double)scale)
-                 ) ;
+      if((axis_limits.second.second - axis_limits.second.first) > sherlock_parameters.tool_zero)
+      {
+        double factor = ((double) generate_random_int(scale, axis_limits.first + k + seed + 13)
+        / (double) scale);
+        double shift = factor * (axis_limits.second.second - axis_limits.second.first);
+        point[axis_limits.first] = axis_limits.second.first + shift;
+      }
+      else
+      {
+        point[axis_limits.first] = axis_limits.second.first;
+      } 
     }
+
     if( check(point) )
     {
       return true;
@@ -487,6 +500,11 @@ void region_constraints :: overapproximate_polyhedron_as_rectangle(
                            map< uint32_t, pair< double, double > >& interval
 )
 {
+  if(!limits_in_axes_directions.empty())
+  {
+    interval = limits_in_axes_directions;
+    return;
+  }
 
   interval.clear();
   assert(!polytope.empty());
@@ -516,6 +534,7 @@ void region_constraints :: overapproximate_polyhedron_as_rectangle(
       // direction return the constant term
 
       direction_vector[each_term_1.first] = -1.0;
+
       optimize_in_direction(direction_vector, *this, range.first);
 
       // Get the upper limit
@@ -555,13 +574,16 @@ vector<int> region_constraints :: get_input_indices()
   linear_inequality linear_ineq = polytope[0];
   vector< int > return_vector;
 
+  return_vector.clear();
   for(auto each_term : linear_ineq.inequality)
   {
-    if(! each_term.first < 0)
+    if(each_term.first > 0)
     {
       return_vector.push_back(each_term.first);
     }
   }
+
+  // assert(return_vector.size() > 0);
 
   return return_vector;
 
@@ -612,7 +634,7 @@ void region_constraints :: add_direction_and_contact_point(
   assert(_contact_point_.size() == (buffer_ineq.inequality.size() - 1));
 
   double val = buffer_ineq.evaluate(_contact_point_);
-  assert((val > -sherlock_parameters.tool_zero) && (val < sherlock_parameters.tool_zero)) ;
+  // assert((val < -sherlock_parameters.tool_zero) || (val > sherlock_parameters.tool_zero)) ;
 
   polytope.push_back(buffer_ineq);
   contact_points.push_back(_contact_point_);
@@ -635,9 +657,10 @@ void region_constraints :: pick_random_directions(int count,
   int seed = 0;
   while(lines.size() < count)
   {
-    seed++;
-    random_index = generate_random_int(polytope.size(), seed + input_seed);
+    seed += 1;
+    random_index = generate_random_int(polytope.size(), seed * input_seed);
     random_index--;
+
     candidate_line = polytope[random_index];
     negation = candidate_line;
     negation.negate();
@@ -667,7 +690,7 @@ void region_constraints :: get_content(vector< linear_inequality > & contents)
 }
 
 
-void print_to_file_in_desmos_format(
+void print_polyhedrons_in_desmos_format(
   vector < region_constraints > & all_polyhedrons,
   string filename
 )
@@ -692,7 +715,7 @@ void print_to_file_in_desmos_format(
       // Print each inequality to file
       //  \left \{ 2x+3y + 4 >0 \right \}
 
-      file << "{";
+      file << " \\{";
       dim = 0;
       for(auto each_term : inequation)
       {
@@ -706,7 +729,7 @@ void print_to_file_in_desmos_format(
           dim ++;
         }
       }
-      file << inequation[-1] << " < 0" << "}";
+      file << inequation[-1] << " > 0" << " \\}";
     }
 
     file << "\n";
@@ -730,14 +753,15 @@ bool optimize_in_direction(
   double data;
   unsigned int dimension = region.get_space_dimension();
 
-  GRBLinExpr expr_one(1.0);
-  GRBLinExpr expr_zero(0.0);
-  GRBLinExpr expr_buffer_0(0.0);
-
   GRBEnv * env_ptr = new GRBEnv();
   erase_line();
   env_ptr->set(GRB_IntParam_OutputFlag, 0);
   GRBModel * model_ptr = new GRBModel(*env_ptr);
+
+
+  GRBLinExpr expr_one(1.0);
+  GRBLinExpr expr_zero(0.0);
+  GRBLinExpr expr_buffer_0(0.0);
 
   string const_name = "one";
   GRBVar const_one = model_ptr->addVar(1.0, 1.0, 0.0, GRB_CONTINUOUS, const_name);
@@ -746,6 +770,7 @@ bool optimize_in_direction(
   expr_buffer_0 = expr_zero;
   data = 1;
   expr_buffer_0.addTerms(& data, & const_one, 1);
+
   model_ptr->addConstr(expr_buffer_0, GRB_EQUAL, 1.0, "constant_1_set");
 
   assert(direction_vector.size() == region.get_space_dimension() ) ;
@@ -757,11 +782,11 @@ bool optimize_in_direction(
 
   // Creating the variables for the equations
   map< uint32_t, GRBVar > basic_variables;
-  GRBVar var;
+  // GRBVar var;
 
   for(auto direction : direction_vector)
   {
-    var = model_ptr->addVar(-GRB_INFINITY,
+    GRBVar var = model_ptr->addVar(-GRB_INFINITY,
                              GRB_INFINITY,
                              0.0,
                              GRB_CONTINUOUS,
@@ -769,9 +794,11 @@ bool optimize_in_direction(
     basic_variables.insert( make_pair (direction.first, var) );
   }
 
+
   // Adding the region constraints
 
   region.add_this_region_to_MILP_model(basic_variables, model_ptr);
+
 
   // Setting the objective
   int direction = 0;
@@ -794,8 +821,13 @@ bool optimize_in_direction(
     }
   }
 
+
   model_ptr->setObjective(objective_expr, GRB_MAXIMIZE);
   model_ptr->optimize();
+  model_ptr->update();
+
+  // string s = "./Gurobi_file_created/interval_finding.lp";
+  // model_ptr->write(s);
 
   if(model_ptr->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
   {

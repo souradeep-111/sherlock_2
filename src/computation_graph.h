@@ -35,6 +35,7 @@ class computation_graph
     void add_new_node(uint32_t node_id, node & node_to_add);
 
     void mark_node_as_input(uint32_t input_node_number);
+    void clear_output_nodes();
     void mark_node_as_output(uint32_t output_node_number);
 
     string return_node_position(uint32_t node_index);

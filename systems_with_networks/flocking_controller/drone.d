@@ -1,6 +1,6 @@
 systems_with_networks/flocking_controller/drone.o: \
- systems_with_networks/flocking_controller/drone.cpp src/sherlock.h \
- src/computation_graph.h src/nodes.h src/configuration.h \
+ systems_with_networks/flocking_controller/drone.cpp src/sherlock_poly.h \
+ src/sherlock.h src/computation_graph.h src/nodes.h src/configuration.h \
  src/network_computation.h src/gurobi_interface.h \
  /opt/gurobi800/linux64/include/gurobi_c++.h \
  /opt/gurobi800/linux64/include/gurobi_c.h \

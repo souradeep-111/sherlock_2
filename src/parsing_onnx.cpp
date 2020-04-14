@@ -985,10 +985,11 @@ bool onnx_parser :: read_graph_proto(onnx::GraphProto & graph_proto,
   ParameterValues < double > p_weight_value;
   ParameterValues < uint32_t > p_nodes_value;
 
-  if(graph_proto.initializer_size() < 1)
-  {
-    return false;
-  }
+  // if(graph_proto.initializer_size() < 1)
+  // {
+  //   cout << "GraphProto reading failed due to initializer size " << endl;
+  //   return false;
+  // }
 
   for(int i = 0; i < graph_proto.initializer_size(); i++)
   {
@@ -1004,6 +1005,7 @@ bool onnx_parser :: read_graph_proto(onnx::GraphProto & graph_proto,
   // Reading the input parameter names of the graph and reading in the dimensions
   if(graph_proto.input_size() == 0)
   {
+    cout << "GraphProto reading failed due to input size " << endl;
     return false;
   }
 
@@ -1303,6 +1305,20 @@ int onnx_parser::read_node_proto(onnx::NodeProto & node_proto,
     if(debug_onnx){cout << "Implementing Flatten" << endl;}
     implement_Flatten(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
     if(debug_onnx){cout << "Implemented Flatten" << endl;}
+    return 1;
+  }
+  else if(operator_name.compare(Slice) == 0)
+  {
+    if(debug_onnx){cout << "Implementing Slice" << endl;}
+    implement_Slice(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
+    if(debug_onnx){cout << "Implemented Slice" << endl;}
+    return 1;
+  }
+  else if(operator_name.compare(Concat) == 0)
+  {
+    if(debug_onnx){cout << "Implementing Concat" << endl;}
+    implement_Concat(node_proto, tensor_name_to_nodes, parameters_map, node_id_to_node, CG);
+    if(debug_onnx){cout << "Implemented Concat" << endl;}
     return 1;
   }
   else
@@ -2486,6 +2502,7 @@ void onnx_parser::implement_MatMul(onnx::NodeProto & node_proto,
   }
   else
   {
+    cout <<"A name - " << _input_A_name_ << " B name - " << _input_B_name_ << endl;
     cout << "Both A and B are of type double hasn't implemented yet." << endl;
     cout << "Error in type MatMul" << endl;
     cout << "Exiting... " << endl;
@@ -2583,8 +2600,11 @@ void onnx_parser::implement_Add(onnx::NodeProto & node_proto,
     result_nodes.dimension_values.clear();
     result_nodes.data_stash.clear();
 
+    assert(input_A.data_stash.size() == input_B.data_stash.size());
+
     for(int dim_index = 0; dim_index < input_A.dimension_values.size(); dim_index++)
-      assert(input_A.dimension_values[dim_index] == input_B.dimension_values[dim_index]);
+      if(dim_index < input_B.dimension_values.size())
+        assert(input_A.dimension_values[dim_index] == input_B.dimension_values[dim_index]);
 
     result_nodes.dimension_values = input_A.dimension_values;
     for(int index = 0; index < input_B.data_stash.size(); index++)
@@ -2660,6 +2680,180 @@ void onnx_parser::implement_Flatten(onnx::NodeProto & node_proto,
     cout << "Tensor name - " << input_name << " .. Exiting.. " << endl;
     assert(false);
   }
+}
+
+void onnx_parser::implement_Slice(onnx::NodeProto & node_proto,
+                    map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                    map< string, ParameterValues < double > > & parameters_map,
+                    map< uint32_t, node > & node_id_to_node,
+                    computation_graph & CG)
+{
+
+  string name, output_name;
+
+  assert(node_proto.attribute_size() == 3);
+  assert(node_proto.input_size() == 1);
+  assert(node_proto.output_size() == 1);
+
+  name = node_proto.input(0);
+  assert(tensor_name_to_nodes.find(name) != tensor_name_to_nodes.end());
+  ParameterValues< uint32_t > data = tensor_name_to_nodes[name];
+
+
+
+  vector< int > axes_values, ends, starts_values;
+
+  for(int attr_index = 0; attr_index < node_proto.attribute_size(); attr_index++)
+  {
+    onnx::AttributeProto attribute_proto = node_proto.attribute(attr_index);
+    name = attribute_proto.name();
+    if(name.compare(0,name.size(), "axes") == 0)
+    {
+      axes_values.clear();
+      for(int index = 0; index < attribute_proto.ints_size(); index++)
+      axes_values.push_back(attribute_proto.ints(index));
+    }
+    else if(name.compare(0,name.size(), "ends") == 0)
+    {
+      ends.clear();
+      for(int index = 0; index < attribute_proto.ints_size(); index++)
+      ends.push_back(attribute_proto.ints(index));
+    }
+    else if(name.compare(0,name.size(), "starts") == 0)
+    {
+      starts_values.clear();
+      for(int index = 0; index < attribute_proto.ints_size(); index++)
+      starts_values.push_back(attribute_proto.ints(index));
+    }
+    else
+    {
+      cout << "Unrecognised attribute in implementing Slice, exiting..." << endl;
+      exit(0);
+    }
+  }
+
+  if(axes_values.empty())
+  {
+    for(int index = 0; index < starts_values.size(); index ++)
+      axes_values.push_back(index);
+  }
+
+
+  assert(axes_values.size() == ends.size());
+  assert(axes_values.size() == starts_values.size());
+
+  ParameterValues < uint32_t > output_tensor;
+  output_tensor.data_stash.clear();
+  output_tensor.dimension_values.clear();
+  vector< int > index;
+  int element_count;
+  index = starts_values;
+
+  for( int axes_index = axes_values.size()-1; axes_index >= 0;
+           axes_index--)
+  {
+    uint32_t current_dim = axes_values[axes_index];
+    uint32_t start_val = starts_values[axes_index];
+    uint32_t end_val = ends[axes_index];
+    element_count = 0;
+    while(index[current_dim] < end_val)
+    {
+      output_tensor.data_stash.push_back(data.get_value(index));
+      index[current_dim]++;
+      element_count++;
+    }
+    output_tensor.dimension_values.insert(output_tensor.dimension_values.begin(), element_count);
+  }
+
+
+  output_name = node_proto.output(0);
+  tensor_name_to_nodes[output_name] = output_tensor;
+
+}
+
+void onnx_parser::implement_Concat(onnx::NodeProto & node_proto,
+                    map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                    map< string, ParameterValues < double > > & parameters_map,
+                    map< uint32_t, node > & node_id_to_node,
+                    computation_graph & CG)
+{
+  string output_name, name;
+  vector< string > input_tensor_names;
+  int axis_index;
+
+  assert(node_proto.attribute_size() == 1);
+  assert(node_proto.output_size() == 1);
+
+  output_name = node_proto.output(0);
+
+  for(int input_index = 0; input_index < node_proto.input_size(); input_index++)
+  {
+    name = node_proto.input(input_index);
+    input_tensor_names.push_back(name);
+    assert(tensor_name_to_nodes.find(name) != tensor_name_to_nodes.end());
+  }
+  assert(input_tensor_names.size() > 1);
+
+  onnx::AttributeProto attribute_proto = node_proto.attribute(0);
+  name = attribute_proto.name();
+  if(name.compare(0,name.size(), "axis") == 0)
+  {
+    axis_index = attribute_proto.i();
+    if(axis_index < 0)
+    {
+      int limit = tensor_name_to_nodes[input_tensor_names[0]].dimension_values.size()-1;
+      axis_index =  limit + axis_index;
+    }
+  }
+
+  ParameterValues< uint32_t > output_tensor;
+  output_tensor.clear();
+  output_tensor = tensor_name_to_nodes[input_tensor_names[0]];
+
+  for(int input_index = 1; input_index < input_tensor_names.size(); input_index++)
+  {
+    ParameterValues< uint32_t > new_tensor = tensor_name_to_nodes[input_tensor_names[input_index]];
+
+    // Concatenate new tensor to output tensor
+    ParameterValues < uint32_t > result_tensor;
+    result_tensor.dimension_values = output_tensor.dimension_values;
+
+    result_tensor.dimension_values[axis_index] = output_tensor.dimension_values[axis_index]
+      + new_tensor.dimension_values[axis_index];
+
+
+    uint32_t result_size = 1;
+    for(auto dim : result_tensor.dimension_values)
+      result_size *= dim;
+    result_tensor.data_stash.resize(result_size);
+
+    vector< int > indices;
+
+    for(int data_index = 0; data_index < result_tensor.data_stash.size(); data_index++)
+    {
+
+      indices = result_tensor.compute_indices(result_tensor.dimension_values, data_index);
+
+      if(indices[axis_index] < output_tensor.dimension_values[axis_index])
+      // Already within the limits of the previous tensor
+      {
+        uint32_t val = output_tensor.get_value(indices);
+        result_tensor.data_stash[data_index] = val;
+      }
+      else
+      // Should be taken up from the new tensor
+      {
+        vector< int > adjusted_indices = indices;
+        adjusted_indices[axis_index] -= output_tensor.dimension_values[axis_index];
+        uint32_t val = new_tensor.get_value(adjusted_indices);
+        result_tensor.data_stash[data_index] = val;
+      }
+    }
+    output_tensor = result_tensor;
+  }
+  tensor_name_to_nodes[output_name] = output_tensor;
+
+  // cout << "Output tensor name after concat - " << output_name << endl;
 }
 
 void reshape_vector(vector< double > reshape_, vector< int > & result)

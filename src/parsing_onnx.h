@@ -42,6 +42,8 @@ const string _Transpose_("Transpose");
 const string MatMul("MatMul");
 const string Add("Add");
 const string Flatten("Flatten");
+const string Slice("Slice");
+const string Concat("Concat");
 
 typedef vector< uint32_t > _id_list_;
 typedef vector< int > _shape_;
@@ -244,6 +246,17 @@ public:
                        map< string, ParameterValues < double > > & parameters_map,
                        map< uint32_t, node > & node_id_to_node,
                        computation_graph & CG);
+   void implement_Slice(onnx::NodeProto & node_proto,
+                       map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                       map< string, ParameterValues < double > > & parameters_map,
+                       map< uint32_t, node > & node_id_to_node,
+                       computation_graph & CG);
+
+   void implement_Concat(onnx::NodeProto & node_proto,
+                        map< string, ParameterValues < uint32_t > > & tensor_name_to_nodes,
+                        map< string, ParameterValues < double > > & parameters_map,
+                        map< uint32_t, node > & node_id_to_node,
+                        computation_graph & CG);
 
    void weight_times_nodes( double scaling_factor,
                             ParameterValues <double> weight_values,
