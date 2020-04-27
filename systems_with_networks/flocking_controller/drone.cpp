@@ -1,10 +1,14 @@
 #include "sherlock_poly.h"
+#include "drone_deps.h"
 
 using namespace std;
 using namespace std::chrono;
 
 int main(int argc, char  ** argv)
 {
+  // if(debug_encoding)
+  //   trace.clear();
+
   sherlock_parameters.thread_count = 1;
   sherlock_parameters.do_incremental_constant_search = true;
   sherlock_parameters.verbosity = false;
@@ -15,54 +19,11 @@ int main(int argc, char  ** argv)
   sherlock_parameters.MILP_M = 1e4;
   sherlock_parameters.verbose_onnx = false;
   sherlock_parameters.use_gurobi_internal_constraints = true;
-
-  string onnx_file = "./systems_with_networks/flocking_controller/drone_controller.onnx";
-  computation_graph CG;
-  onnx_parser my_parser(onnx_file);
-  map<string, ParameterValues < uint32_t > > tensor_mapping;
-  my_parser.build_graph(CG, tensor_mapping);
-
-  // Trying a sample range propagation through the controller
-  map< uint32_t, pair< double, double > > interval;
-
-  double delta = 0.1;
-  interval[1] = make_pair(0, delta);
-  interval[2] = make_pair(0, delta);
-  interval[3] = make_pair(0, delta);
-  interval[4] = make_pair(0, delta);
-  interval[5] = make_pair(0, delta);
-  interval[6] = make_pair(0, delta);
-  interval[7] = make_pair(0, delta);
-  interval[8] = make_pair(0, delta);
-
-  region_constraints region;
-  region.create_region_from_interval(interval);
-
-  uint32_t output_index = 1009;
-  pair<double, double > output_range;
-  sherlock sherlock_instance(CG);
-  // sherlock_instance.compute_output_range(output_index, region, output_range);
-  // Expected Value : [-0.812381 , -0.783142 ]
-  cout << "Computed output range by Sherlock = [" <<
-	output_range.first << " , " << output_range.second << " ] " << endl;
-
-  output_index = 1010;
-  // sherlock_instance.compute_output_range(output_index, region, output_range);
-  // Expected Value : [0.50932 , 0.511107 ]
-  cout << "Computed output range by Sherlock = [" <<
-	output_range.first << " , " << output_range.second << " ] " << endl;
+  sherlock_parameters.timeout_seconds = 1e8;
 
 
-  polyhedral_abstraction sherlock_poly;
-  region_constraints output_polyhedron;
-  set < uint32_t > output_indices;
-  output_indices.insert(output_index);
-
-  sherlock_poly.propagate_polyhedrons(CG, region, output_polyhedron, output_indices);
-
-  cout << " ------ Output polyhedron computed ----- " << endl;
-  output_polyhedron.print();
-
+  string filepath = "./systems_with_networks/flocking_controller/drone_controller.onnx";
+  // controller_range_propagation(filepath);
 
   // sherlock_instance.compute_output_range_by_sampling(region, output_index, output_range, 1000);
   // cout << "Computed output range by sampling = [" <<
@@ -76,5 +37,47 @@ int main(int argc, char  ** argv)
   // Order of inputs seems to be : [relative pos, velocity]
 
 
+  // Forming the initial states :
+  Plant_index_to_Interval initial_position_limits;
+  Plant_index_to_Value counter_example;
 
+  Name_to_Interval Plant_1_init;
+  // Plant_1_init["x"] = make_pair(1.4321, 1.4324);
+  // Plant_1_init["y"] = make_pair(-1.8, -1.7096);
+  // Plant_1_init["vx"] = make_pair(-0.7, -0.69);
+  // Plant_1_init["vy"] = make_pair(0.79, 0.8);
+  //
+  // Name_to_Interval Plant_2_init;
+  // Plant_2_init["x"] = make_pair(-0.3, -0.29);
+  // Plant_2_init["y"] = make_pair(2.0, 2.08);
+  // Plant_2_init["vx"] = make_pair(0.92, 0.93);
+  // Plant_2_init["vy"] = make_pair(0.1, 0.2);
+
+  Plant_1_init["x"] = make_pair(0, 5);
+  Plant_1_init["y"] = make_pair(0, 5);
+  Plant_1_init["vx"] = make_pair(-5, 5);
+  Plant_1_init["vy"] = make_pair(-5, 5);
+
+  Name_to_Interval Plant_2_init;
+  Plant_2_init["x"] = make_pair(0, 5);
+  Plant_2_init["y"] = make_pair(0, 5);
+  Plant_2_init["vx"] = make_pair(-5, 5);
+  Plant_2_init["vy"] = make_pair(-5, 5);
+
+  initial_position_limits[0] = Plant_1_init;
+  initial_position_limits[1] = Plant_2_init;
+  double distance  = 0.01; // 2 * 1.414
+
+  bool status = check_safety(initial_position_limits, distance,
+                             filepath, 1, 2, distance, counter_example);
+
+
+  if(status)
+    cout << "Property holds" << endl;
+  else
+  {
+    cout << "Property fails ! " << endl;
+    cout << "Here is the counter example " << endl;
+    print(counter_example);
+  }
 }

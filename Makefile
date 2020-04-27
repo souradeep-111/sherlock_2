@@ -59,8 +59,13 @@ python_interface: ./src/python_interface.o $(OBJS)
 	$(CXX) -O3 -w $(LINK_FLAGS) -o $@ $^ $(LIBS)
 
 drone: \
-	./systems_with_networks/flocking_controller/drone.o $(OBJS)
+	./systems_with_networks/flocking_controller/drone.o ./systems_with_networks/flocking_controller/drone_deps.o $(OBJS)
 	$(CXX) -O3 -w $(LINK_FLAGS) -o $@ $^ $(LIBS)
+
+drone_deps: \
+	./systems_with_networks/flocking_controller/drone_deps.o $(OBJS)
+	$(CXX) -O3 -w $(LINK_FLAGS) -o $@ $^ $(LIBS)
+
 
 ./tests/test_1: ./tests/test_1.o $(OBJS)
 	$(CXX) -O3 -w $(LINK_FLAGS) -o $@ $^ $(LIBS)
@@ -112,6 +117,6 @@ clean:
 	rm -f ./src/*.o ./src/neural_rule_analysis/*.o *.o ./run_file ./lib/* ./include/*.h \
 	./ODE_reach_tubes/*.o ./tests/*.o ./tests/test_1 ./tests/test_2 ./tests/test_3 \
 	./tests/test_3_poly ./tests/test_4 ./tests/test_5 ./tests/test_6 ./tests/test_7 \
-	./src/*.pb.* ./tests/test_8
+	./src/*.pb.* ./tests/test_8 ./systems_with_networks/flocking_controller/*.o
 
 -include ${DEPENDS}

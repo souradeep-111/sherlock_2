@@ -178,4 +178,5 @@ systems_with_networks/flocking_controller/drone.o: \
  eigen_file/eigen_ridge.hpp src/generate_constraints.h \
  src/region_constraints.h src/network_signatures.h \
  src/selective_binarization.h src/parsing_onnx.h src/onnx.pb.h \
- src/image_handler.h
+ src/image_handler.h \
+ systems_with_networks/flocking_controller/drone_deps.h

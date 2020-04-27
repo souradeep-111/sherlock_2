@@ -46,6 +46,67 @@ void constraints_stack :: create_the_input_overapproximation_for_each_neuron(
   }
 }
 
+void constraints_stack :: fill_model_with_graph_constraints(
+                          map< uint32_t, GRBVar > & input_vars,
+                          map< uint32_t, GRBVar > & output_vars,
+                          computation_graph & CG,
+                          GRBModel * input_model)
+{
+
+  model_ptr = input_model;
+  model_ptr->set(GRB_DoubleParam_IntFeasTol, sherlock_parameters.int_tolerance);
+  model_ptr->set(GRB_DoubleParam_TimeLimit, sherlock_parameters.timeout_seconds);
+  neurons.clear();
+  binaries.clear();
+  neuron_bounds.clear();
+  skip_activation_encoding_for_index.clear();
+
+  input_vars.clear();
+  output_vars.clear();
+
+  // Basically encode the whole network here
+
+
+
+  // Getting a reference to all the nodes in the computation graph
+  map< uint32_t, node >& all_nodes = CG.return_ref_to_all_nodes();
+
+  // Declaring the neurons for the input nodes of the computation graph
+  vector< uint32_t > input_node_indices, output_node_indices;
+  CG.return_id_of_input_output_nodes(input_node_indices, output_node_indices);
+
+  for(auto & input_node_index : input_node_indices)
+  {
+    GRBVar var = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS,  all_nodes[input_node_index].get_node_name() );
+    neurons.insert( make_pair( input_node_index, var) );
+    input_vars[input_node_index] = var;
+  }
+
+  for(auto each_node : all_nodes)
+  {
+    auto flag  = find(input_node_indices.begin(), input_node_indices.end(), each_node.first);
+    if(flag == input_node_indices.end())
+    {
+      neuron_bounds[each_node.first] = make_pair(-sherlock_parameters.MILP_M, sherlock_parameters.MILP_M);
+    }
+  }
+
+  // A table which keeps track of the nodes who's constraints have already been added ,
+  // we initialize it with the inputs of the computation graph to begin with
+  vector < uint32_t > explored_nodes;
+  for(auto each_input_index : input_node_indices)
+  {
+    explored_nodes.push_back(each_input_index);
+  }
+  // Call generate_node_constraints on the output of the graph
+  for(auto & node_id : output_node_indices)
+  {
+    generate_node_constraints(CG, explored_nodes, node_id);
+    output_vars[node_id] = neurons[node_id];
+  }
+
+}
+
 void constraints_stack :: generate_graph_constraints(region_constraints & region,
                                                      computation_graph & CG,
                                                      uint32_t output_node_id)
@@ -268,6 +329,7 @@ void constraints_stack :: relate_input_output(node current_node,
     if(sherlock_parameters.use_gurobi_internal_constraints)
     {
       model_ptr->addGenConstrMax(output_var, & input_var, 1, 0.0, " relu constr " );
+      // Check documentation here : https://www.gurobi.com/documentation/9.0/refman/cpp_model_agc_max.html
     }
     else if(!sherlock_parameters.encode_relu_new)
     {

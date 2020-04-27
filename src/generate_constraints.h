@@ -71,6 +71,11 @@ class constraints_stack
                          double& current_optima, bool direction,
                          map< uint32_t, double >& neuron_value);
 
+    void fill_model_with_graph_constraints(map< uint32_t, GRBVar > & input_vars,
+                                           map< uint32_t, GRBVar > & output_vars,
+                                           computation_graph & CG,
+                                           GRBModel * input_model);
+
     double get_M_val_for_node(uint32_t node_index);
     void create_sum_of_inputs_and_return_var(map< uint32_t, GRBVar > & inputs_to_node,
                                              node current_node,
