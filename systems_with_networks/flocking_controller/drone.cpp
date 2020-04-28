@@ -53,20 +53,20 @@ int main(int argc, char  ** argv)
   // Plant_2_init["vx"] = make_pair(0.92, 0.93);
   // Plant_2_init["vy"] = make_pair(0.1, 0.2);
 
-  Plant_1_init["x"] = make_pair(0, 5);
-  Plant_1_init["y"] = make_pair(0, 5);
-  Plant_1_init["vx"] = make_pair(-5, 5);
-  Plant_1_init["vy"] = make_pair(-5, 5);
+  Plant_1_init["x"] = make_pair(-3, -2.9);
+  Plant_1_init["y"] = make_pair(-3, -2.9);
+  Plant_1_init["vx"] = make_pair(-1, -0.9);
+  Plant_1_init["vy"] = make_pair(1, 1.1);
 
   Name_to_Interval Plant_2_init;
-  Plant_2_init["x"] = make_pair(0, 5);
-  Plant_2_init["y"] = make_pair(0, 5);
-  Plant_2_init["vx"] = make_pair(-5, 5);
-  Plant_2_init["vy"] = make_pair(-5, 5);
+  Plant_2_init["x"] = make_pair(3, 3.1);
+  Plant_2_init["y"] = make_pair(3, 3.1);
+  Plant_2_init["vx"] = make_pair(-1, -0.9);
+  Plant_2_init["vy"] = make_pair(1, 1.1);
 
   initial_position_limits[0] = Plant_1_init;
   initial_position_limits[1] = Plant_2_init;
-  double distance  = 0.01; // 2 * 1.414
+  double distance  = 2 * 1.414; // 2 * 1.414
 
   bool status = check_safety(initial_position_limits, distance,
                              filepath, 1, 2, distance, counter_example);

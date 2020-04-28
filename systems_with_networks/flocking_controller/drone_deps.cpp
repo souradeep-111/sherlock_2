@@ -1,6 +1,6 @@
 #include "drone_deps.h"
 
-bool debug_encoding = false;
+bool debug_encoding = true;
 map< string, GRBVar > trace;
 
 void controller_range_propagation(string onnx_file)
@@ -99,24 +99,36 @@ bool check_safety(Plant_index_to_Interval initial_position_limits,
   // Add initial distance constraints
   for(auto & each_plant : initial_all_plant_states)
   {
-    GRBVar min_distance = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, "_min_distance_" + to_string(each_plant.first));
+    closest_plant_distances[index] = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, "_min_distance_for_" + to_string(each_plant.first));
 
     assert(initial_all_plant_states.size() > 1);
-    closest_k_rel_pos(initial_all_plant_states, each_plant.first, 1, temp_closest_states, model_ptr);
-    assert(temp_closest_states.size() == 1);
-    for(auto plant_states : temp_closest_states)
-      compute_norm(plant_states.second, min_distance, model_ptr);
+    closest_k_rel_pos(initial_all_plant_states, each_plant.first, 2, temp_closest_states, model_ptr);
+    assert(temp_closest_states.size() == 2); // 2 since, the closest one is itself, 2nd is the closest other plant
+    int order = 0;
+    for(auto & plant_states : temp_closest_states)
+    {
+      if(order > 0) // the second one
+      {
+        compute_norm(plant_states.second, closest_plant_distances[index], model_ptr);
+        break;
+      }
+      order++;
+    }
 
-    closest_plant_distances[index] = min_distance;
+
     index++;
   }
 
   init_min_dist = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, "_min_dist_across_all_plants_init_");
-  model_ptr->addGenConstrMin(init_min_dist, closest_plant_distances, 1, 0.0, "_comp_min_dist_init_");
+  model_ptr->addGenConstrMin(init_min_dist, closest_plant_distances, no_of_plants, GRB_INFINITY, "_comp_min_dist_init_");
   model_ptr->addConstr(init_min_dist, GRB_GREATER_EQUAL, min_initial_distance, "_closest_dist_lower_limit_init_");
 
-  simulate_plant_and_controller(initial_all_plant_states, final_all_plant_states, controller_filename,
-                                simulation_steps, steps_per_control, model_ptr);
+
+
+    simulate_plant_and_controller(initial_all_plant_states, final_all_plant_states, controller_filename,
+      simulation_steps, steps_per_control, model_ptr);
+
+
 
   // Add final distance limits constraints
   GRBVar * final_plant_distances = new GRBVar [no_of_plants];
@@ -126,30 +138,41 @@ bool check_safety(Plant_index_to_Interval initial_position_limits,
   // Add ifinal distance constraints
   for(auto & each_plant : final_all_plant_states)
   {
-    GRBVar min_distance = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, "_min_distance_");
+    final_plant_distances[index] = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, "_min_distance_for_" + to_string(each_plant.first));
 
-    closest_k_rel_pos(final_all_plant_states, each_plant.first, 1, temp_closest_states, model_ptr);
-    assert(temp_closest_states.size() == 1);
-    for(auto plant_states : temp_closest_states)
-      compute_norm(plant_states.second, min_distance, model_ptr);
+    closest_k_rel_pos(final_all_plant_states, each_plant.first, 2, temp_closest_states, model_ptr);
+    assert(temp_closest_states.size() == 2); // 2 since, the closest one is itself, 2nd is the closest other plant
 
-    final_plant_distances[index] = min_distance;
+    int order = 0;
+    for(auto & plant_states : temp_closest_states)
+    {
+      if(order > 0) // the second one
+      {
+        compute_norm(plant_states.second, final_plant_distances[index], model_ptr);
+        break;
+      }
+      order++;
+    }
+
+
     index++;
   }
 
   final_min_dist = model_ptr->addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, "_min_dist_across_all_plants_final_");
-  model_ptr->addGenConstrMin(final_min_dist, closest_plant_distances, 1, 0.0, "_comp_min_dist_final_");
-  model_ptr->addConstr(final_min_dist, GRB_LESS_EQUAL, min_initial_distance, "_closest_dist_lower_limit_final_");
+  model_ptr->addGenConstrMin(final_min_dist, final_plant_distances, no_of_plants, GRB_INFINITY, "_comp_min_dist_final_");
+  model_ptr->addConstr(final_min_dist, GRB_LESS_EQUAL, min_final_distance, "_closest_dist_lower_limit_final_");
+
 
   // Optimize and get the counter example if any
 
-  GRBLinExpr objective_expr;
-  objective_expr = 0;
-  model_ptr->setObjective(objective_expr, GRB_MAXIMIZE);
-  model_ptr->update();
-  model_ptr->optimize();
   string s = "./Gurobi_file_created/Linear_program.lp";
   model_ptr->write(s);
+
+  GRBLinExpr objective_expr;
+  objective_expr = 0.0;
+  model_ptr->setObjective(objective_expr, GRB_MINIMIZE);
+  model_ptr->update();
+  model_ptr->optimize();
 
   if(model_ptr->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
   {
